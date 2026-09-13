@@ -156,7 +156,7 @@
   position: relative;
   display: flex;
   align-items: center;
-  border-radius: 10px;
+  border-radius: var(--radius-row);
 }
 .channelRow .channelLink {
   min-width: 0;
@@ -190,30 +190,30 @@
 .rowMenu {
   position: fixed;
   z-index: 6;
-  width: min(190px, calc(100vw - 16px));
-  max-height: min(320px, calc(100vh - 16px));
+  width: min(190px, calc(100vw - (2 * var(--space-2))));
+  max-height: min(320px, calc(100vh - (2 * var(--space-2))));
   overflow-y: auto;
-  padding: 6px;
+  padding: var(--space-1h);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   box-shadow: var(--elevation-popover);
 }
 .rowMenu .rowMenuLabel,
 .rowMenu p {
   margin: 0;
-  padding: 5px 8px;
+  padding: var(--space-1) var(--space-2);
   color: var(--text-muted);
-  font-size: calc(11px * var(--buzz-text-scale, 1));
-  line-height: 16px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
 }
 .rowMenu button {
-  gap: 7px;
+  gap: var(--space-1h);
   min-height: 30px;
 }
 .rowMenu button[aria-checked="true"] {
   background: var(--surface-accent);
-  font-weight: 600;
+  font-weight: var(--type-weight-medium);
 }
 .rowMenu button[aria-checked="true"]::after {
   content: "✓";
@@ -467,4 +467,44 @@
   flex-shrink: 0;
   border-top: 1px solid var(--border);
   overflow: hidden;
+}
+
+.channelSection > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.channelList .sectionMenuButton {
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.sectionMenu {
+  position: fixed;
+  z-index: 7;
+  width: min(190px, calc(100vw - (2 * var(--space-2))));
+  padding: var(--space-1h);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  box-shadow: var(--elevation-popover);
+}
+.sectionMenu p {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1h);
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+}
+.sectionMenu button[aria-checked="true"] {
+  background: var(--surface-accent);
+  font-weight: var(--type-weight-medium);
+}
+.sectionMenu button[aria-checked="true"]::after {
+  content: "✓";
+  margin-inline-start: auto;
 }
