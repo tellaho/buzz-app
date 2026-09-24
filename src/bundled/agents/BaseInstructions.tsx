@@ -31,9 +31,11 @@ import { Input } from "../../shared/design-system/ui/Input";
 import { Textarea } from "../../shared/design-system/ui/Textarea";
 import {
   availableInstructionModules,
+  instructionEditorText,
   instructionDraft,
   instructionDraftChanged,
   instructionGroup,
+  instructionTextWithBoundary,
   LOCAL_INSTRUCTIONS_PLUGIN,
   LOCAL_INSTRUCTIONS_REVISION,
   normalizedModules,
@@ -47,6 +49,7 @@ type Editor = {
   module: SavedModule;
   title: string;
   text: string;
+  dirty: boolean;
 };
 type Drag = {
   key: string;
@@ -133,7 +136,13 @@ function BaseInstructionBuilder({
     setError(null);
   };
   const edit = (module: SavedModule, location: Editor["location"]) => {
-    setEditor({ location, module, title: module.title, text: module.text });
+    setEditor({
+      location,
+      module,
+      title: module.title,
+      text: module.text,
+      dirty: false,
+    });
     setEditorError(null);
   };
   const move = (from: number, to: number) => {
@@ -521,6 +530,7 @@ function BaseInstructionBuilder({
                       },
                       title: editorSource.title,
                       text: editorSource.text,
+                      dirty: false,
                     });
                     setEditorError(null);
                   }}
@@ -546,7 +556,10 @@ function BaseInstructionBuilder({
                   const edited = {
                     ...editor.module,
                     title: editor.title.trim(),
-                    text: editor.text,
+                    text: instructionTextWithBoundary(
+                      editor.text,
+                      editor.module.text,
+                    ),
                   };
                   mutate((current) => {
                     if (editor.location === "active")
@@ -603,14 +616,22 @@ function BaseInstructionBuilder({
             </Field>
             <Field
               label="Instructions"
-              description="Markdown is passed to agents exactly as written."
+              description="Trailing blank lines are hidden while editing."
             >
               <Textarea
                 variant="code"
                 rows={18}
-                value={editor.text}
+                value={
+                  editor.dirty
+                    ? editor.text
+                    : instructionEditorText(editor.text)
+                }
                 onChange={(event) =>
-                  setEditor({ ...editor, text: event.currentTarget.value })
+                  setEditor({
+                    ...editor,
+                    text: event.currentTarget.value,
+                    dirty: true,
+                  })
                 }
               />
             </Field>

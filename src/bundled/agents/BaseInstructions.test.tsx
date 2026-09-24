@@ -53,7 +53,7 @@ it("requires explicit adoption, retains saved state on failure and never restart
       ...proposal.composition,
       modules: proposal.composition.modules.map((module) => ({
         ...module,
-        text: "saved instructions",
+        text: "saved instructions\n\n",
       })),
     },
     inactiveModules: [],
@@ -82,7 +82,14 @@ it("requires explicit adoption, retains saved state on failure and never restart
   }
   render(<Harness />);
   expect(host.adoptInstructions).not.toHaveBeenCalled();
-  editCore("edited instructions");
+  fireEvent.click(screen.getByRole("button", { name: "Edit Core" }));
+  expect(
+    (screen.getByLabelText("Instructions") as HTMLTextAreaElement).value,
+  ).toBe("saved instructions");
+  fireEvent.change(screen.getByLabelText("Instructions"), {
+    target: { value: "edited instructions\n\n" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save trait" }));
   fireEvent.click(screen.getByRole("button", { name: "Apply base prompt" }));
   await waitFor(() =>
     expect(screen.getByText(/Could not confirm the base prompt/)).toBeTruthy(),
@@ -93,7 +100,7 @@ it("requires explicit adoption, retains saved state on failure and never restart
       modules: [
         expect.objectContaining({
           key: "fixture/core",
-          text: "edited instructions",
+          text: "edited instructions\n\n",
         }),
       ],
     },

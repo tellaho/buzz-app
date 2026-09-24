@@ -6,8 +6,10 @@ import type {
 } from "../../features/agent-instructions/service";
 import {
   availableInstructionModules,
+  instructionEditorText,
   instructionDraft,
   instructionDraftChanged,
+  instructionTextWithBoundary,
   LOCAL_INSTRUCTIONS_PLUGIN,
   LOCAL_INSTRUCTIONS_REVISION,
   normalizedModules,
@@ -39,6 +41,16 @@ const proposal: InstructionProposal = {
 };
 
 describe("base instruction drafts", () => {
+  it("hides trailing whitespace while preserving the source boundary", () => {
+    expect(instructionEditorText("Instructions.\n\n  \n")).toBe(
+      "Instructions.",
+    );
+    expect(instructionEditorText("  \n")).toBe("");
+    expect(instructionTextWithBoundary("Edited.\n\n\n", "Original.\n\n")).toBe(
+      "Edited.\n\n",
+    );
+  });
+
   it("prefers retained inactive edits over source defaults", () => {
     const saved: SavedInstructions = {
       revision: 1,

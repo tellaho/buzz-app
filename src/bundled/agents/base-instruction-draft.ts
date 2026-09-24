@@ -34,6 +34,14 @@ export function normalizedModules(modules: readonly SavedModule[]) {
   return modules.map((module, index) => ({ ...module, order: index * 10 }));
 }
 
+export function instructionEditorText(text: string) {
+  return text.trimEnd();
+}
+
+export function instructionTextWithBoundary(text: string, source: string) {
+  return `${text.trimEnd()}${source.slice(source.trimEnd().length)}`;
+}
+
 export function availableInstructionModules(
   draft: MutableInstructionDraft,
   proposal: InstructionProposal,
