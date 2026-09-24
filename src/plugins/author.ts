@@ -96,3 +96,10 @@ export type {
   AgentImportPreview,
   ImportSource,
 } from "../features/agents/control";
+
+export type {
+  AgentInstructions,
+  InstructionModule,
+  InstructionComposition,
+  SavedInstructions,
+} from "../features/agent-instructions/service";

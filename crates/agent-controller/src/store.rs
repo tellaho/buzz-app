@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 struct Document {
     version: u32,
     agents: Vec<Agent>,
+    #[serde(default)]
+    instructions: Option<crate::SavedInstructions>,
     #[serde(flatten)]
     extra: BTreeMap<String, Value>,
 }
@@ -53,7 +55,14 @@ impl Store {
         lock.try_lock()
             .map_err(|_| "Another Buzz app owns this agent storage")?;
         let store = Self { root, _lock: lock };
-        store.read()?;
+        let mut document = store.read()?;
+        if document.version == 1 {
+            // One-time adoption of the frozen carryover. Later app/plugin updates
+            // never regenerate persisted bytes during startup.
+            document.version = 2;
+            document.instructions = Some(crate::SavedInstructions::baseline());
+            store.write(&document)?;
+        }
         Ok(store)
     }
     pub fn root(&self) -> &Path {
@@ -132,9 +141,40 @@ impl Store {
     pub fn snapshot(&self) -> Result<crate::ControlSnapshot> {
         Ok(crate::ControlSnapshot {
             agents: self.agents()?.iter().map(Agent::view).collect(),
+            instructions: self.instructions()?,
             runtime_available: false,
             runtime_message: Some("Native runtime has not been connected".into()),
         })
+    }
+    pub(crate) fn instructions(&self) -> Result<crate::SavedInstructions> {
+        self.read()?
+            .instructions
+            .ok_or_else(|| "Saved base instructions are missing; reopen the controller".into())
+    }
+    pub(crate) fn adopt_instructions(
+        &mut self,
+        expected_revision: u64,
+        composition: crate::InstructionComposition,
+    ) -> Result<()> {
+        composition.validate()?;
+        let mut doc = self.read()?;
+        let saved = doc
+            .instructions
+            .as_mut()
+            .ok_or("Saved base instructions are missing")?;
+        if saved.revision != expected_revision {
+            return Err("Base instructions changed; refresh before applying your selection".into());
+        }
+        if saved.composition == composition {
+            return Ok(());
+        }
+        saved.revision = saved
+            .revision
+            .checked_add(1)
+            .filter(|n| *n <= 9_007_199_254_740_991)
+            .ok_or("Instruction revision exhausted")?;
+        saved.composition = composition;
+        self.write(&doc)
     }
     pub fn save(&mut self, id: &str, revision: u64, edit: AgentEdit) -> Result<()> {
         let mut doc = self.read()?;
@@ -212,8 +252,14 @@ impl Drop for Store {
     }
 }
 fn validate(doc: &Document) -> Result<()> {
-    if doc.version != 1 || doc.agents.len() > MAX_AGENTS {
+    if !matches!(doc.version, 1 | 2) || doc.agents.len() > MAX_AGENTS {
         return Err("Unsupported agent storage version or size; left unchanged".into());
+    }
+    if doc.version == 2 && doc.instructions.is_none() {
+        return Err("Saved base instructions are missing; left unchanged".into());
+    }
+    if let Some(instructions) = &doc.instructions {
+        instructions.validate()?;
     }
     let mut ids = BTreeSet::new();
     for agent in &doc.agents {

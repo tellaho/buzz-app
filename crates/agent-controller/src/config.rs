@@ -13,6 +13,7 @@ pub(crate) const MAX_AGENTS: usize = 2000;
 #[serde(rename_all = "camelCase")]
 pub struct ControlSnapshot {
     pub agents: Vec<AgentView>,
+    pub instructions: crate::SavedInstructions,
     pub runtime_available: bool,
     pub runtime_message: Option<String>,
 }
@@ -30,6 +31,8 @@ pub struct AgentView {
     pub harness: HarnessView,
     pub revision: u64,
     pub running_revision: Option<u64>,
+    pub saved_instructions: Option<crate::InstructionIdentity>,
+    pub running_instructions: Option<crate::InstructionIdentity>,
     pub enabled: bool,
     pub status: ProcessStatus,
     pub error: Option<String>,
@@ -143,6 +146,8 @@ impl Agent {
             },
             revision: self.revision,
             running_revision: None,
+            saved_instructions: None,
+            running_instructions: None,
             enabled: self.enabled,
             status: ProcessStatus::Stopped,
             error: None,

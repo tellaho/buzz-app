@@ -28,7 +28,7 @@ export function ManagedAgentActions({
     }
   }, [imported]);
   const startBlock = agentLaunchBlock(state, agent);
-  const act = (action: "start" | "stop") => {
+  const act = (action: "start" | "stop" | "restart") => {
     void control.action(agent.id, action).catch(() => {});
   };
   return (
@@ -42,6 +42,17 @@ export function ManagedAgentActions({
           {agentProcessLabel(agent)}
         </p>
       </div>
+      {agent.savedInstructions && (
+        <p className="m-0 text-body-sm text-secondary">
+          Base saved r{agent.savedInstructions.revision}
+          {agent.runningInstructions &&
+            ` · running r${agent.runningInstructions.revision}`}
+          {agent.runningInstructions &&
+            agent.runningInstructions.revision !==
+              agent.savedInstructions.revision &&
+            " · changes pending restart"}
+        </p>
+      )}
       {imported && !agent.enabled && (
         <p role="status">
           Imported, not started. Mention this agent in a channel to start it.
@@ -81,6 +92,19 @@ export function ManagedAgentActions({
             Start
           </Button>
         )}
+        {agent.status === "running" &&
+          agent.runningInstructions &&
+          agent.savedInstructions &&
+          agent.runningInstructions.revision !==
+            agent.savedInstructions.revision && (
+            <Button
+              size="compact"
+              disabled={!!startBlock}
+              onClick={() => act("restart")}
+            >
+              Restart to apply base
+            </Button>
+          )}
         <Button
           size="compact"
           disabled={!canStopAgent(state, agent.id)}

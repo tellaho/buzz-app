@@ -308,6 +308,12 @@ export function Settings({
                       : undefined
                   }
                 />
+                <p className="text-body-sm text-secondary">
+                  Instruction plugins affect the proposal in Agents → Base
+                  instructions. Switches do not change saved agent instructions.
+                  Review and apply there; running agents require an explicit
+                  restart.
+                </p>
                 {catalog ? (
                   <PluginImport
                     plugins={plugins}

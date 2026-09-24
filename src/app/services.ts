@@ -2,6 +2,7 @@
 import { SettingsCardsService } from "../features/settings/service";
 import { TemplateProvidersService } from "../features/channel-templates/provider";
 import { IdentityNamesService } from "../features/identity-names/service";
+import { AgentInstructionsService } from "../features/agent-instructions/service";
 import { bindAgentMentions } from "../features/agents/mention-wake";
 import { provideAgentControl } from "../features/agents/control-service";
 import { HostService } from "../features/host/service";
@@ -36,6 +37,7 @@ export function createServices() {
     bundled: bundledPlugins,
   });
   const agentControl = provideAgentControl(ctx);
+  const agentInstructions = new AgentInstructionsService(ctx, plugins);
   const navigationHost = provideNavigation(ctx);
   const navigation = navigationHost.navigation;
   const browser = new BrowserService(ctx);
@@ -74,6 +76,7 @@ export function createServices() {
   return {
     agentControl,
     browser,
+    agentInstructions,
     notifications,
     navigation,
     navigationHost,

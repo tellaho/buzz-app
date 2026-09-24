@@ -48,6 +48,11 @@ export function nativeAgentControlHost(): AgentControlHost | null {
         signature,
       });
     },
+    adoptInstructions: (expectedRevision, composition) =>
+      invoke("agent_control_adopt_instructions", {
+        expectedRevision,
+        composition,
+      }),
     save: (id, expectedRevision, edit) =>
       invoke("agent_control_save", { id, expectedRevision, edit }),
     delete: (id, expectedRevision) =>

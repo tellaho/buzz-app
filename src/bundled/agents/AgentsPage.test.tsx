@@ -315,6 +315,40 @@ it("keeps lifecycle controls visible and reports failure without disabling recov
     within(card).getByText(/bundled agent runtime is unavailable/),
   ).toBeVisible();
 });
+it("keeps base restart explicit, exact-destination and subject to shared launch gating", async () => {
+  const { f, control } = setup("ready", (fixture) => {
+    fixture.agent.savedInstructions = { revision: 2, sha256: "b".repeat(64) };
+    fixture.agent.runningInstructions = { revision: 1, sha256: "a".repeat(64) };
+  });
+  const cards = await screen.findAllByRole("article", {
+    name: "Agent Fixture agent",
+  });
+  const card = cards.find((entry) =>
+    entry.textContent?.includes("wss://second.example"),
+  );
+  if (!card) throw Error("Second destination missing");
+  const restart = within(card).getByRole("button", {
+    name: "Restart to apply base",
+  });
+  expect(restart).toBeEnabled();
+  expect(within(card).getByText(/changes pending restart/)).toBeVisible();
+  expect(f.calls.every((call) => call.action === "snapshot")).toBe(true);
+  f.data.runtimeAvailable = false;
+  await act(async () => control.refresh());
+  expect(restart).toBeDisabled();
+  expect(within(card).getByRole("button", { name: "Stop" })).toBeEnabled();
+  f.data.runtimeAvailable = true;
+  await act(async () => control.refresh());
+  expect(restart).toBeEnabled();
+  fireEvent.click(restart);
+  await waitFor(() =>
+    expect(f.calls.at(-1)).toEqual({
+      action: "restart",
+      payload: { id: "other-destination" },
+    }),
+  );
+});
+
 it("Add opens a focused creation dialog and retains a dirty draft on Escape", async () => {
   const { f } = setup();
   const add = await screen.findByRole("button", { name: "Add agent" });

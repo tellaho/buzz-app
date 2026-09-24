@@ -7,6 +7,8 @@ mod create;
 mod credentials;
 mod defaults;
 mod import;
+mod instruction_composition;
+mod instructions;
 pub mod logs;
 mod ownership;
 pub mod pi;
@@ -28,6 +30,10 @@ pub use credentials::PlatformCredentials;
 pub use defaults::{build_defaults, BuildDefaults};
 pub use import::{CredentialedImport, ImportPreview, Imports, LegacySource, PreparedImport};
 pub use restart::{RestartChange, RestartDiffEntry};
+pub use instruction_composition::{
+    InstructionComposition, InstructionIdentity, InstructionModule, InstructionPlugin,
+    SavedInstructions,
+};
 pub use runtime::{installed, Action, Controller, GooseModelContext, ModelContext};
 pub use secret::{Credentials, Secret};
 pub use store::Store;

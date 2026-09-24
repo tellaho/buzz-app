@@ -32,7 +32,7 @@ test("generated author package exposes agentControl, host, and identity names", 
     await writeFile(
       join(dir, "consumer.ts"),
       `
-import type { Context, AgentControl, Host, PluginManifest, NamingPolicy } from "@buzz/author";
+import type { Context, AgentControl, Host, PluginManifest, NamingPolicy, AgentInstructions } from "@buzz/author";
 export const manifest: PluginManifest = {
   id: "example.plugin", name: "Example", apiVersion: 1,
   host: {
@@ -40,7 +40,7 @@ export const manifest: PluginManifest = {
     networkOrigins: ["https://api.example.com"],
   },
 };
-export const inject = ["agentControl", "host", "identityNames"];
+export const inject = ["agentControl", "host", "identityNames", "agentInstructions"];
 export function apply(ctx: Context) {
   const policy: NamingPolicy = {
     id: "alternative",
@@ -48,6 +48,8 @@ export function apply(ctx: Context) {
   };
   ctx.identityNames.register(policy);
   const control: AgentControl = ctx.agentControl;
+  const instructions: AgentInstructions = ctx.agentInstructions;
+  instructions.register({ id: "example", title: "Example", order: 30, text: "Example base instructions" });
   void control.refresh();
   void control.action("sample", "stop");
   const host: Host = ctx.host;

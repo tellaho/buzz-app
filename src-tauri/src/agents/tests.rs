@@ -100,11 +100,14 @@ pub(crate) fn seed(dir: &std::path::Path) -> String {
         "733db93c5a38b650794422a480fab67f1dd8f6f40112c360f9814dfaec3bfcbb"
     );
     // Public artificial identity and write-only sample environment; no key custody.
-    std::fs::write(dir.join("store/agents.json"), serde_json::to_vec(&json!({"version":1,"agents":[{
+    let path = dir.join("store/agents.json");
+    let mut saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    saved["agents"] = json!([{
         "id":id, "pubkey":"ab".repeat(32), "relayUrl":"wss://relay.example", "name":"Sample", "systemPrompt":"Original",
         "workspace":dir.to_str().unwrap(), "harness":{"command":"buzz-agent","args":[],"model":"sample","provider":"sample"},
         "environment":{"SAMPLE_TOKEN":"DO_NOT_PROJECT"},"revision":1,"enabled":true,"credentialId":"missing-fixture-key", "authTag":null, "imported":{}
-    }]})).unwrap()).unwrap();
+    }]);
+    std::fs::write(path, serde_json::to_vec(&saved).unwrap()).unwrap();
     id
 }
 #[test]
@@ -731,7 +734,7 @@ async fn native_start_restore_disconnect_stop_and_quit_fence_late_credentials() 
     saved["agents"][0]["harness"]["databricks"] =
         json!({"host":"https://workspace.example", "filter":""});
     std::fs::write(path, serde_json::to_vec(&saved).unwrap()).unwrap();
-    for action in ["disconnect", "stop", "quit"] {
+    for action in ["instructions", "disconnect", "stop", "quit"] {
         if action == "quit" {
             let path = dir.path().join("store/agents.json");
             let mut saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
@@ -768,6 +771,17 @@ async fn native_start_restore_disconnect_stop_and_quit_fence_late_credentials() 
         .unwrap();
         if action == "quit" {
             host.shutdown().unwrap();
+        } else if action == "instructions" {
+            let snapshot = invoke(&view, "agent_control_snapshot", json!({})).unwrap();
+            invoke(
+                &view,
+                "agent_control_adopt_instructions",
+                json!({
+                    "expectedRevision": snapshot["instructions"]["revision"],
+                    "composition": snapshot["instructions"]["composition"]
+                }),
+            )
+            .unwrap();
         } else if action == "disconnect" {
             host.disconnect("https://workspace.example").unwrap();
         } else {
@@ -1070,5 +1084,57 @@ fn log_ipc_requires_fresh_exact_owner_proof_and_consumes_challenge() {
         )
         .unwrap(),
         ""
+    );
+}
+
+#[test]
+fn real_ipc_instruction_adoption_is_durable_cas_and_fences_pending_starts() {
+    let (dir, host, _app, view) = fixture();
+    let id = seed(dir.path());
+    let before = invoke(&view, "agent_control_snapshot", json!({})).unwrap();
+    let mut composition = before["instructions"]["composition"].clone();
+    composition["modules"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|module| module["pluginId"] != "buzz.projects");
+    for plugin in composition["plugins"].as_array_mut().unwrap() {
+        if plugin["id"] == "buzz.projects" {
+            plugin["enabled"] = json!(false);
+        }
+    }
+    host.with(|h| {
+        h.starts.insert(id.clone(), (1, None));
+        Ok(())
+    })
+    .unwrap();
+    let request = json!({"expectedRevision":1,"composition":composition});
+    let saved = invoke(&view, "agent_control_adopt_instructions", request.clone()).unwrap();
+    assert_eq!(saved["instructions"]["revision"], 2);
+    assert_eq!(saved["instructions"]["composition"], composition);
+    assert_eq!(saved["agents"][0]["savedInstructions"]["revision"], 2);
+    assert!(saved["agents"][0]["runningInstructions"].is_null());
+    host.with(|h| {
+        assert!(h.starts.is_empty());
+        Ok(())
+    })
+    .unwrap();
+    let path = dir.path().join("store/agents.json");
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(invoke(&view, "agent_control_adopt_instructions", request).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    std::fs::remove_file(dir.path().join("store/agents.previous.json")).unwrap();
+    std::fs::create_dir(dir.path().join("store/agents.previous.json")).unwrap();
+    assert!(invoke(
+        &view,
+        "agent_control_adopt_instructions",
+        json!({
+            "expectedRevision":2,"composition":before["instructions"]["composition"]
+        })
+    )
+    .is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(
+        invoke(&view, "agent_control_snapshot", json!({})).unwrap()["instructions"],
+        saved["instructions"]
     );
 }

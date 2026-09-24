@@ -278,6 +278,7 @@ struct Running {
     revision: u64,
     /// Native-only: holds environment values and is never serialized.
     spawned: serde_json::Value,
+    instructions: crate::InstructionIdentity,
     databricks_host: Option<String>,
     #[cfg(all(test, unix))]
     temporary: Option<PathBuf>,
@@ -337,12 +338,15 @@ impl Controller {
         let (acp_command, mcp_command) = (command("buzz-acp"), command("buzz-dev-mcp"));
         let mut snapshot = ControlSnapshot {
             agents: saved.iter().map(Agent::view).collect(),
+            instructions: self.store.instructions()?,
             runtime_available: self.bundle.is_ok(),
             runtime_message: self.bundle.as_ref().err().cloned(),
         };
+        let saved_instructions = snapshot.instructions.identity();
         for (saved, agent) in saved.iter().zip(&mut snapshot.agents) {
             agent.acp_command.clone_from(&acp_command);
             agent.mcp_command.clone_from(&mcp_command);
+            agent.saved_instructions = Some(saved_instructions.clone());
             if let Some(run) = self.running.get_mut(&agent.id) {
                 match run.process.alive() {
                     Ok(true) => {
@@ -352,6 +356,7 @@ impl Controller {
                             &run.spawned,
                             &crate::restart::spawn_config(saved),
                         );
+                        agent.running_instructions = Some(run.instructions.clone());
                     }
                     Ok(false) => {
                         self.running.remove(&agent.id);
@@ -497,6 +502,15 @@ impl Controller {
         crate::logs::verify_owner_proof(&tag[1], id, pubkey, &relay, nonce, signature)?;
         let path = crate::logs::path(self.store.root(), id)?;
         crate::logs::read(&path)
+    }
+    pub fn adopt_instructions(
+        &mut self,
+        expected_revision: u64,
+        composition: crate::InstructionComposition,
+    ) -> Result<ControlSnapshot> {
+        self.store
+            .adopt_instructions(expected_revision, composition)?;
+        self.snapshot()
     }
     pub fn save(&mut self, id: &str, revision: u64, edit: AgentEdit) -> Result<ControlSnapshot> {
         self.store.save(id, revision, edit)?;
@@ -683,6 +697,12 @@ impl Controller {
             .tempdir_in(&runs)
             .map_err(|_| "Could not create private runtime directory")?;
         let mut command = bundle.command(&agent, key)?;
+        // A required whole-base override, not an addition to the engine fallback.
+        // Materialize before spawn and retain the bytes for this process lifetime.
+        let instructions = self.store.instructions()?;
+        let base_prompt =
+            crate::instructions::materialize(temporary.path(), &instructions.composition.text())?;
+        command.env("BUZZ_ACP_BASE_PROMPT_FILE", base_prompt);
         // Per-send startup input, never saved configuration or inherited environment.
         if let Some(floor) = replay_floor {
             command.env("BUZZ_ACP_REPLAY_FLOOR", floor.to_string());
@@ -722,6 +742,7 @@ impl Controller {
                 process,
                 revision: agent.revision,
                 spawned: crate::restart::spawn_config(&agent),
+                instructions: instructions.identity(),
                 databricks_host: settings.map(|s| s.host),
                 #[cfg(all(test, unix))]
                 temporary: Some(temporary),

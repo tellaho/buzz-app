@@ -8,6 +8,8 @@ import namingManifest from "./identity-naming/manifest.json";
 import * as naming from "./identity-naming";
 import feedbackManifest from "./feedback/manifest.json";
 import * as feedback from "./feedback";
+import instructionsManifest from "./agent-instructions/manifest.json";
+import * as instructions from "./agent-instructions";
 import activityManifest from "./agent-activity/manifest.json";
 import * as activity from "./agent-activity";
 import terminalManifest from "./terminal/manifest.json";
@@ -54,6 +56,10 @@ export const bundledPlugins: readonly BundledPlugin[] = [
     enabledByDefault: false,
   },
   { manifest: { ...namingManifest, apiVersion: 1 }, module: naming },
+  {
+    manifest: { ...instructionsManifest, apiVersion: 1 },
+    module: instructions,
+  },
   { manifest: { ...activityManifest, apiVersion: 1 }, module: activity },
   { manifest: { ...terminalManifest, apiVersion: 1 }, module: terminal },
   { manifest: { ...profilesManifest, apiVersion: 1 }, module: profiles },

@@ -3,6 +3,8 @@ import { useAgentControl } from "../../features/agents/control-react";
 import { sameCommunityAgents } from "../../features/agents/choices";
 import type { PageNavigation } from "../../features/navigation/service";
 import { useEffect, useState, type ReactNode } from "react";
+import type { AgentInstructions } from "../../features/agent-instructions/service";
+import { BaseInstructions } from "./BaseInstructions";
 import type {
   AgentControl,
   AgentControlState,
@@ -21,6 +23,7 @@ import "./AgentControls.css";
 /** No relay dependency. Page lifetime owns observation only, never native execution. */
 export function AgentControlPanel({
   control,
+  instructions,
   importDestination = "",
   createOwner,
   resolveName,
@@ -31,6 +34,7 @@ export function AgentControlPanel({
 }: {
   resolveName?: ReturnType<typeof useIdentityNames>;
   control: AgentControl;
+  instructions?: AgentInstructions | undefined;
   importDestination?: string;
   createOwner?: string | undefined;
   editTarget?: string | null;
@@ -170,6 +174,13 @@ export function AgentControlPanel({
         <Button onClick={() => void control.refresh()}>Retry status</Button>
       )}
       {state.busy && <p role="status">Waiting for the host to confirm…</p>}
+      {instructions && (
+        <BaseInstructions
+          instructions={instructions}
+          control={control}
+          state={state}
+        />
+      )}
       {children ? (
         children(state, edit, duplicate, remove, importedId, label)
       ) : (

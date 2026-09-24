@@ -1,6 +1,11 @@
 /** Native-owned configuration and process evidence; never a relay-session capability. */
 // Keep injection reachable from the generated author contract, not host construction.
 import type {} from "@deepseek-ai/cordis";
+import type {
+  InstructionComposition,
+  InstructionIdentity,
+  SavedInstructions,
+} from "../agent-instructions/service";
 import { communityRequest } from "../communities/api";
 import { relayOrigin } from "../communities/destination";
 import { createAgentModels, type AgentModels, type ModelHost } from "./models";
@@ -41,6 +46,8 @@ export interface AgentView {
   };
   revision: number;
   runningRevision: number | null;
+  savedInstructions?: InstructionIdentity | null;
+  runningInstructions?: InstructionIdentity | null;
   enabled: boolean;
   status: "stopped" | "starting" | "running" | "stopping" | "failed";
   error: string | null;
@@ -68,6 +75,7 @@ export interface AgentView {
 }
 export interface ControlSnapshot {
   agents: AgentView[];
+  instructions?: SavedInstructions;
   runtimeAvailable: boolean;
   /** Native-owned editing suggestions, not installation or execution evidence.
    * Optional so an older running native host retains editable custom values. */
@@ -113,6 +121,10 @@ export type AgentLogTarget = Pick<AgentView, "id" | "pubkey" | "relayUrl"> & {
 export interface AgentControlHost {
   readLog?(target: AgentLogTarget): Promise<string>;
   models?: ModelHost;
+  adoptInstructions?(
+    expectedRevision: number,
+    composition: InstructionComposition,
+  ): Promise<ControlSnapshot>;
   prepareCreate?(
     requestId: string,
     destination: string,
@@ -158,6 +170,7 @@ export interface AgentControl {
   /** Sensitive local output. Native custody and exact community are rechecked per read. */
   readLog?(target: AgentLogTarget): Promise<string>;
   models?: AgentModels;
+  adoptInstructions?: AgentControlHost["adoptInstructions"];
   create?(
     requestId: string,
     destination: string,
@@ -369,6 +382,19 @@ export function createAgentControl(
             if (disposed) throw new Error(agentControlUnavailable);
             return content;
           },
+        }
+      : {}),
+    ...(host?.adoptInstructions
+      ? {
+          adoptInstructions: (
+            revision: number,
+            composition: InstructionComposition,
+          ) =>
+            run((native) => {
+              if (!native.adoptInstructions)
+                throw new Error("Instruction adoption is unavailable.");
+              return native.adoptInstructions(revision, composition);
+            }, ready),
         }
       : {}),
     ...(host?.prepareCreate && host.commitCreate

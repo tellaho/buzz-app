@@ -112,6 +112,10 @@ pub fn bundled_manifests() -> Vec<Manifest> {
         ))
         .expect("identity naming manifest"),
         serde_json::from_str(include_str!(
+            "../../../src/bundled/agent-instructions/manifest.json"
+        ))
+        .expect("agent instructions manifest"),
+        serde_json::from_str(include_str!(
             "../../../src/bundled/agent-activity/manifest.json"
         ))
         .expect("agent activity manifest"),

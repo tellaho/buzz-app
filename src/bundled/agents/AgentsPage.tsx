@@ -4,6 +4,7 @@ import type { PageProps } from "../../features/pages/service";
 import type { OpenTarget } from "../../features/navigation/targets";
 import type { OpenResult } from "../../features/navigation/controller";
 import { editAgentRoute } from "./edit-route";
+import type { AgentInstructions } from "../../features/agent-instructions/service";
 import type {
   AgentControl,
   AgentControlState,
@@ -22,6 +23,7 @@ import { ManagedAgentActions } from "./ManagedAgentActions";
 export function AgentsPage({
   relay,
   control,
+  instructions,
   navigation,
   open,
 }: PageProps & {
@@ -31,6 +33,7 @@ export function AgentsPage({
     target: OpenTarget,
     options?: { replace?: boolean },
   ) => Promise<OpenResult>;
+  instructions?: AgentInstructions;
 }) {
   const connection = useRelayConnection(relay);
   const resolveName = useIdentityNames(connection.session.names);
@@ -114,6 +117,7 @@ export function AgentsPage({
                     );
                 }}
                 resolveName={resolveName}
+                instructions={instructions}
                 importDestination={importDestination}
                 createOwner={
                   connection.status === "ready" ? connection.viewer : undefined

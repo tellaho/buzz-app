@@ -392,3 +392,80 @@ fn invalid_avatar_and_stale_save_leave_persistent_bytes_unchanged() {
     assert!(store.save(&a.id, 0, update).is_err());
     assert_eq!(fs::read(store.path()).unwrap(), before);
 }
+
+#[test]
+fn instruction_adoption_is_cas_pinned_and_failure_preserves_previous_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(dir.path().to_owned()).unwrap();
+    let baseline = store.instructions().unwrap();
+    assert_eq!(
+        baseline.composition.text(),
+        include_str!("../../instructions/base.md")
+    );
+    let mut selection = baseline.composition.clone();
+    selection.modules.retain(|m| m.plugin_id != "buzz.projects");
+    selection
+        .plugins
+        .iter_mut()
+        .find(|p| p.id == "buzz.projects")
+        .unwrap()
+        .enabled = false;
+    store.adopt_instructions(1, selection.clone()).unwrap();
+    let saved = store.instructions().unwrap();
+    assert_eq!(saved.revision, 2);
+    assert_eq!(saved.composition, selection);
+    let before = fs::read(store.path()).unwrap();
+    assert!(store
+        .adopt_instructions(1, baseline.composition.clone())
+        .is_err());
+    assert_eq!(fs::read(store.path()).unwrap(), before);
+    // Fail before replacing settings, without relying on chmod under privileged tests.
+    fs::remove_file(dir.path().join("agents.previous.json")).unwrap();
+    fs::create_dir(dir.path().join("agents.previous.json")).unwrap();
+    assert!(store.adopt_instructions(2, baseline.composition).is_err());
+    assert_eq!(fs::read(store.path()).unwrap(), before);
+    drop(store);
+    let reopened = Store::open(dir.path().to_owned()).unwrap();
+    assert_eq!(reopened.instructions().unwrap().composition, selection);
+    assert_eq!(fs::read(reopened.path()).unwrap(), before);
+}
+
+#[test]
+fn migrated_store_pins_once_and_missing_instructions_never_become_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("agents.json");
+    fs::write(&path, r#"{"version":1,"agents":[],"future":"preserve"}"#).unwrap();
+    let store = Store::open(dir.path().to_owned()).unwrap();
+    assert_eq!(store.instructions().unwrap().revision, 1);
+    let mut data: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(data["version"], 2);
+    assert_eq!(data["future"], "preserve");
+    data.as_object_mut().unwrap().remove("instructions");
+    fs::write(&path, serde_json::to_vec(&data).unwrap()).unwrap();
+    assert!(store.snapshot().is_err());
+    drop(store);
+    assert!(Store::open(dir.path().to_owned()).is_err());
+    let after: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(after, data);
+}
+
+#[test]
+fn invalid_composition_is_rejected_without_persistence() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(dir.path().to_owned()).unwrap();
+    let baseline = store.instructions().unwrap().composition;
+    let before = fs::read(store.path()).unwrap();
+    for failure in 0..6 {
+        let mut bad = baseline.clone();
+        match failure {
+            0 => bad.modules.push(bad.modules[0].clone()),
+            1 => bad.modules[0].revision = "unmatched".into(),
+            2 => bad.modules[0].text = "x".repeat(1_048_577),
+            3 => bad.modules[0].text = "invalid\0text".into(),
+            4 => bad.modules.reverse(),
+            _ => bad.modules.clear(),
+        }
+        assert!(store.adopt_instructions(1, bad).is_err());
+        assert_eq!(fs::read(store.path()).unwrap(), before);
+    }
+}

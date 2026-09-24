@@ -1,7 +1,7 @@
 import type { PluginModule } from "../../plugins/api";
 import { AgentsPage } from "./AgentsPage";
 import { editAgentRoute } from "./edit-route";
-export const inject = ["pages", "relay", "agentControl", "navigation"];
+export const inject = ["pages", "relay", "agentControl", "navigation", "agentInstructions"];
 export const apply: PluginModule["apply"] = (ctx) => {
   const relay = ctx.relay;
   const control = ctx.agentControl;
@@ -20,6 +20,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
         relay={relay}
         control={control}
         open={ctx.navigation.open}
+        instructions={ctx.agentInstructions}
       />
     ),
   });

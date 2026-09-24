@@ -158,6 +158,24 @@ or packaged/native acceptance; validation results and remaining gates belong in 
 pull request. Updating the native bundled catalog requires a desktop rebuild/restart;
 frontend hot reload alone cannot add the entry.
 
+### Agent base instruction contributions
+
+Instruction-only plugins and feature plugins share
+`ctx.agentInstructions.register({ id, title, order, text })`. The existing Cordis
+scope supplies plugin identity/revision and disposal. Contributions are ordered
+by numeric order then namespaced key; text is concatenated exactly, with no
+injected separators. Authors own their module's boundary whitespace. Projects
+contributes its existing base section; the bundled Base instructions plugin
+contributes the surrounding unchanged text.
+
+This registry proposes content; it does not own execution or persistence. Native
+agent control retains the exact adopted composition, plugin selections and saved
+revision independently of plugin/page lifetime. Settings switches affect the
+proposal only. The owner reviews it in Agents and explicitly applies it; running
+agents require Restart. Failed/incomplete activation blocks Apply, and a plugin
+update never silently replaces saved bytes. See [agent controls](agent-control.md#app-owned-base-instructions)
+for migration, validation, scope and delivery-evidence limits.
+
 ### Composer accessories
 
 `ctx.conversation.registerAccessory({ id, title, order?, component })` contributes

@@ -121,6 +121,8 @@ fn bundle(directory: &Path) -> RuntimeBundle {
     ] {
         let path = directory.join(name);
         fs::write(&path, r#"#!/bin/sh
+printf '%s\n' "$BUZZ_ACP_BASE_PROMPT_FILE" > base-path
+/bin/cat "$BUZZ_ACP_BASE_PROMPT_FILE" > received-base
 printf '%s\n' "$BUZZ_ACP_LAZY_POOL" "$BUZZ_ACP_IDLE_POOL_SLEEP" "$BUZZ_ACP_SYSTEM_PROMPT" "$BUZZ_ACP_MODEL" "$BUZZ_ACP_AGENT_ARGS" "$BUZZ_RELAY_URL" "$BUZZ_ACP_RESPOND_TO" "$BUZZ_MANAGED_AGENT" "$BUZZ_ACP_REPLAY_FLOOR" "$PROVIDER_TEST_SETTING" >> starts
 printf '%s\n' "$BUZZ_AGENT_CONFIG_DIR" "$DATABRICKS_HOST" "$DATABRICKS_MODEL_FILTER" "${DATABRICKS_TOKEN-unset}" "$TMPDIR" "$PATH" > runtime-env
 printf 'harness fixture output\n'
@@ -589,6 +591,95 @@ fn stop_reports_cleanup_before_durable_disable_failure() {
     );
     fs::remove_file(temp).unwrap();
     fs::remove_dir_all(moved).unwrap();
+}
+
+#[test]
+#[cfg(unix)]
+fn spawned_listener_receives_exact_app_base_until_confirmed_teardown() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config");
+    let mut store = Store::open(config.clone()).unwrap();
+    let a = agent(dir.path());
+    store.insert(vec![a.clone()]).unwrap();
+    let mut controller = Controller::new(
+        store,
+        Arc::new(Memory),
+        Ok(bundle(tools.path())),
+        dir.path().join("ownership"),
+    );
+    let expected = include_bytes!("../../instructions/base.md");
+    let launched_base = |launches: usize| {
+        // The child reads the override before publishing its launch record.
+        wait_for_contents(&dir.path().join("starts"), |text| {
+            (text.lines().count() == launches * 10).then_some(())
+        });
+        let path = PathBuf::from(
+            fs::read_to_string(dir.path().join("base-path"))
+                .unwrap()
+                .trim(),
+        );
+        assert!(path.is_absolute());
+        assert!(path.starts_with(config.join("runs")));
+        assert_eq!(fs::read(&path).unwrap(), expected);
+        assert_eq!(
+            fs::read(dir.path().join("received-base")).unwrap(),
+            expected
+        );
+        path
+    };
+    controller.action(&a.id, Action::Start).unwrap();
+    let first = launched_base(1);
+    controller
+        .save(
+            &a.id,
+            1,
+            AgentEdit {
+                name: a.name.clone(),
+                system_prompt: "saved agent instructions".into(),
+                workspace: a.workspace.clone(),
+                harness: a.harness.clone(),
+                environment: BTreeMap::new(),
+            },
+        )
+        .unwrap();
+    assert_eq!(controller.running[&a.id].revision, 1);
+    assert_eq!(fs::read(&first).unwrap(), expected);
+    controller.action(&a.id, Action::Restart).unwrap();
+    let second = launched_base(2);
+    assert_ne!(first, second);
+    assert!(!first.exists());
+    assert_eq!(controller.running[&a.id].revision, 2);
+    controller.shutdown().unwrap();
+    assert!(!second.exists());
+    controller.restore().unwrap();
+    let restored = launched_base(3);
+    assert_ne!(second, restored);
+    controller.action(&a.id, Action::Stop).unwrap();
+    assert!(!restored.exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn unavailable_launch_storage_reports_failure_without_spawning() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config");
+    let mut store = Store::open(config.clone()).unwrap();
+    let a = agent(dir.path());
+    store.insert(vec![a.clone()]).unwrap();
+    fs::write(config.join("runs"), "not a directory").unwrap();
+    let mut controller = Controller::new(
+        store,
+        Arc::new(Memory),
+        Ok(bundle(tools.path())),
+        dir.path().join("ownership"),
+    );
+    let failed = controller.action(&a.id, Action::Start).unwrap();
+    assert!(matches!(failed.agents[0].status, ProcessStatus::Failed));
+    assert!(failed.agents[0].error.is_some());
+    assert!(controller.running.is_empty());
+    assert!(!dir.path().join("starts").exists());
 }
 
 #[test]
@@ -1618,4 +1709,101 @@ fn pi_selection_and_extensions_survive_save_reopen_and_reach_adapter() {
             .command(&configured, &key)
             .is_ok());
     }
+}
+
+#[test]
+#[cfg(unix)]
+fn projects_selection_survives_cold_restore_without_frontend_and_requires_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config");
+    let mut store = Store::open(config.clone()).unwrap();
+    let a = agent(dir.path());
+    store.insert(vec![a.clone()]).unwrap();
+    let runtime = bundle(tools.path());
+    let mut controller = Controller::new(
+        store,
+        Arc::new(Memory),
+        Ok(RuntimeBundle::new(tools.path().to_owned()).unwrap()),
+        dir.path().join("ownership"),
+    );
+    controller.action(&a.id, Action::Start).unwrap();
+    wait_for_contents(&dir.path().join("starts"), |text| {
+        (text.lines().count() == 10).then_some(())
+    });
+    let original = fs::read_to_string(dir.path().join("received-base")).unwrap();
+    let mut selection = controller.store.instructions().unwrap().composition;
+    selection
+        .modules
+        .retain(|module| module.plugin_id != "buzz.projects");
+    selection
+        .plugins
+        .iter_mut()
+        .find(|p| p.id == "buzz.projects")
+        .unwrap()
+        .enabled = false;
+    let expected = selection.text();
+    let saved = controller.adopt_instructions(1, selection).unwrap();
+    assert_eq!(
+        saved.agents[0]
+            .saved_instructions
+            .as_ref()
+            .unwrap()
+            .revision,
+        2
+    );
+    assert_eq!(
+        saved.agents[0]
+            .running_instructions
+            .as_ref()
+            .unwrap()
+            .revision,
+        1
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("received-base")).unwrap(),
+        original
+    );
+    // Quit keeps enabled intent; a new controller has no frontend or plugin registry.
+    controller.shutdown().unwrap();
+    drop(controller);
+    let store = Store::open(config).unwrap();
+    let mut controller = Controller::new(
+        store,
+        Arc::new(Memory),
+        Ok(runtime),
+        dir.path().join("ownership"),
+    );
+    let restored = controller.restore().unwrap();
+    wait_for_contents(&dir.path().join("starts"), |text| {
+        (text.lines().count() == 20).then_some(())
+    });
+    assert_eq!(
+        fs::read_to_string(dir.path().join("received-base")).unwrap(),
+        expected
+    );
+    assert_eq!(
+        restored.agents[0].running_instructions,
+        restored.agents[0].saved_instructions
+    );
+    controller
+        .adopt_instructions(2, crate::SavedInstructions::baseline().composition)
+        .unwrap();
+    let restarted = controller.action(&a.id, Action::Restart).unwrap();
+    wait_for_contents(&dir.path().join("starts"), |text| {
+        (text.lines().count() == 30).then_some(())
+    });
+    assert_eq!(
+        fs::read_to_string(dir.path().join("received-base")).unwrap(),
+        original
+    );
+    assert_eq!(
+        restarted.agents[0]
+            .running_instructions
+            .as_ref()
+            .unwrap()
+            .revision,
+        3
+    );
+    controller.action(&a.id, Action::Stop).unwrap();
 }

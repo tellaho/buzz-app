@@ -199,6 +199,55 @@ fail-closed. This does not clean up listeners orphaned before this fix, does not
 contain a worker that deliberately escapes its session, and does not add process
 containment on non-Unix platforms.
 
+## App-owned base instructions
+
+The native controller embeds `crates/agent-controller/instructions/base.md`, an
+unchanged import from Buzz revision `84b0fd04b7831657df2873c3a835412f47cebb03`.
+The adjacent `source.json` records the original path, byte count and SHA-256.
+This is an ownership transfer, not automatic inheritance on runtime upgrades.
+
+The first controller open migrates version-1 storage to a version-2 document with
+that exact baseline. Its three ordered modules preserve the original bytes:
+Buzz/CLI, Projects, and the remaining agent behavior. Future app/plugin upgrades
+never regenerate saved content. A missing or malformed version-2 composition
+blocks use rather than silently replacing it with defaults. Migration retains
+unknown document/agent fields and uses the existing private atomic-write path.
+
+The existing plugin lifecycle supplies **proposals**, not execution state.
+`agentInstructions.register({ id, title, order, text })` namespaces each contribution
+by its installed plugin identity/revision and removes it on disposal. The bundled
+instruction-only plugin owns the non-Projects sections; Projects contributes its
+section. Disabled Projects is absent from the proposal. Incomplete/failed plugin
+activation blocks adoption rather than silently omitting unavailable text.
+
+**Settings → Plugins** changes plugin availability; it does not atomically change
+native agent instructions. **Agents → Base instructions** shows proposed and saved
+text, module sources and a rough token estimate. **Apply base instructions** is the
+explicit second step: native validates ordering, metadata, bounds and selected
+plugin revisions, then compare-and-swap saves exact bytes. The UI does not claim
+adoption until native confirms it. Failed/uncertain writes require a fresh read
+before retry; no automatic restart occurs. These defaults cover all local agents
+and communities in this app profile, not a selected relay identity.
+
+Every Start/Restart (including enabled-agent restoration and mention-start)
+materializes the **retained native composition**, without requiring React/plugin
+activation, as an owner-readable regular file in the private `runs/agent-*`
+directory. ACP receives `BUZZ_ACP_BASE_PROMPT_FILE` and selects it **instead of**
+its compiled base. Materialization failure prevents launch. Per-agent
+`BUZZ_ACP_SYSTEM_PROMPT`, runtime session model and per-turn reply context retain
+their existing separate owners.
+
+Save/adoption does not rewrite an existing launch file. Cards distinguish saved
+and running instruction revisions and expose **Restart to apply base** when they
+differ. Adoption retires pending credential-start tickets; late credentials cannot
+start an agent using instructions different from that request. Confirmed teardown
+removes the launch directory. These identities/file bytes are launch evidence,
+**not** retained per-session delivery receipts or proof of model compliance.
+
+This slice has review/apply, not the full module editor, custom overrides or
+per-agent base selections. Deep threading still requires a runtime reply-policy
+hook; shared instruction sets and retained per-session Activity remain deferred.
+
 ## Ownership and handoff
 
 - `features/agents/control.ts`: camelCase DTOs and app-owned observable projection.
