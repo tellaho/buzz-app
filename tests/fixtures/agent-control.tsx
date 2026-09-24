@@ -20,6 +20,7 @@ import type {
 } from "../../src/features/relay/service";
 import { createAgentControl } from "../../src/features/agents/control";
 import { controlFixture } from "../../src/features/agents/control-testing";
+import type { AgentInstructions } from "../../src/features/agent-instructions/service";
 import { Button } from "../../src/shared/design-system/ui/Button";
 import { useKeyboardFocusVisibility } from "../../src/shared/design-system/useKeyboardFocusVisibility";
 import "../../src/shared/styles/globals.css";
@@ -130,6 +131,70 @@ const fixture = controlFixture();
 // Browser journeys start with an explicitly manual-start agent. The shared
 // control fixture remains explicit-on for the profile preference tests.
 fixture.agent.startOnAppLaunch = false;
+const promptModules = [
+  {
+    key: "buzz.agent-instructions/buzz-identity",
+    title: "Buzz identity",
+    pluginId: "buzz.agent-instructions",
+    revision: "bundled",
+    order: 0,
+    text: "You are an agent operating inside Buzz.\n\n",
+  },
+  {
+    key: "buzz.agent-instructions/threading",
+    title: "Threading",
+    pluginId: "buzz.agent-instructions",
+    revision: "bundled",
+    order: 10,
+    text: "## Threading\n\nKeep human conversations flat.\n\n",
+  },
+  {
+    key: "buzz.agent-instructions/engineering-discipline",
+    title: "Engineering discipline",
+    pluginId: "buzz.agent-instructions",
+    revision: "bundled",
+    order: 20,
+    text: "## Engineering Discipline\n\nUnderstand before changing.\n",
+  },
+] as const;
+const promptProposal = {
+  composition: {
+    modules: promptModules,
+    plugins: [
+      { id: "buzz.agent-instructions", revision: "bundled", enabled: true },
+    ],
+  },
+  error: null,
+};
+const promptInstructions: AgentInstructions = {
+  register() {},
+  snapshot: () => promptProposal,
+  subscribe: () => () => {},
+};
+fixture.data.instructions = {
+  revision: 1,
+  composition: promptProposal.composition,
+  inactiveModules: [],
+};
+fixture.agent.savedInstructions = { revision: 1, sha256: "saved-one" };
+fixture.agent.runningInstructions = { revision: 1, sha256: "saved-one" };
+fixture.host.adoptInstructions = async (expectedRevision, draft) => {
+  fixture.calls.push({
+    action: "adopt-instructions",
+    payload: { expectedRevision, draft },
+  });
+  if (expectedRevision !== fixture.data.instructions?.revision)
+    throw "Base instructions changed; refresh before applying.";
+  fixture.data.instructions = {
+    revision: expectedRevision + 1,
+    ...structuredClone(draft),
+  };
+  fixture.agent.savedInstructions = {
+    revision: expectedRevision + 1,
+    sha256: `saved-${expectedRevision + 1}`,
+  };
+  return structuredClone(fixture.data);
+};
 const modelCalls: string[] = [];
 let modelMode = "success";
 let releaseModels: (() => void) | undefined;
@@ -406,6 +471,7 @@ function Fixture() {
             relay={relay}
             key={browser ? "browser" : "native"}
             control={browser ? unavailable : control}
+            instructions={promptInstructions}
           />
         )
       )}

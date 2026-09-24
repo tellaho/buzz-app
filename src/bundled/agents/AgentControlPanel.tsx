@@ -13,6 +13,7 @@ import type {
 import { PlusIcon } from "../../shared/design-system/icons/index";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Accordion } from "../../shared/design-system/ui/Accordion";
+import { Tabs } from "../../shared/design-system/ui/Tabs";
 import { AgentCard } from "./AgentCard";
 import { AgentEditor } from "./AgentEditor";
 import { AgentImport } from "./AgentImport";
@@ -54,6 +55,7 @@ export function AgentControlPanel({
     owner: string;
     source?: AgentView;
   } | null>(null);
+  const [view, setView] = useState<"agents" | "base-prompt">("agents");
   const [importSections, setImportSections] = useState<string[]>([]);
   const [importedId, setImportedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<{
@@ -139,7 +141,7 @@ export function AgentControlPanel({
             Manage your agents and bring them into a conversation.
           </p>
         </div>
-        {state.data && (
+        {state.data && view === "agents" && (
           <Button
             variant="primary"
             aria-haspopup="dialog"
@@ -175,58 +177,73 @@ export function AgentControlPanel({
       )}
       {state.busy && <p role="status">Waiting for the host to confirm…</p>}
       {instructions && (
+        <Tabs
+          variant="panel"
+          label="Agent settings"
+          value={view}
+          onValueChange={setView}
+          items={[
+            { value: "agents", label: "Agents" },
+            { value: "base-prompt", label: "Base prompt" },
+          ]}
+        />
+      )}
+      {view === "base-prompt" && instructions ? (
         <BaseInstructions
           instructions={instructions}
           control={control}
           state={state}
         />
-      )}
-      {children ? (
-        children(state, edit, duplicate, remove, importedId, label)
       ) : (
-        <div className="agent-grid">
-          {state.data?.agents.map((agent) => (
-            <AgentCard
-              key={agent.id}
-              name={label(agent)}
-              identities={[agent]}
-              editable={[agent]}
-              onEdit={edit}
-              onDuplicate={duplicate}
-              onDelete={control.delete ? remove : undefined}
-            />
-          ))}
-        </div>
-      )}
-      {state.data && (
-        <Accordion
-          variant="activity"
-          value={importSections}
-          onValueChange={setImportSections}
-          items={[
-            {
-              value: "old-buzz",
-              title: "Not imported from old Buzz",
-              content: importSections.includes("old-buzz") ? (
-                <AgentImport
-                  key={importDestination}
-                  control={control}
-                  initialDestination={importDestination}
-                  managedAgents={state.data.agents}
-                  commitAvailable={
-                    state.status === "ready" &&
-                    state.data.importAvailable !== false
-                  }
-                  disabled={state.busy}
-                  onImported={(agents) => {
-                    setImportedId(agents[0]?.id ?? null);
-                    setImportSections([]);
-                  }}
+        <>
+          {children ? (
+            children(state, edit, duplicate, remove, importedId, label)
+          ) : (
+            <div className="agent-grid">
+              {state.data?.agents.map((agent) => (
+                <AgentCard
+                  key={agent.id}
+                  name={label(agent)}
+                  identities={[agent]}
+                  editable={[agent]}
+                  onEdit={edit}
+                  onDuplicate={duplicate}
+                  onDelete={control.delete ? remove : undefined}
                 />
-              ) : null,
-            },
-          ]}
-        />
+              ))}
+            </div>
+          )}
+          {state.data && (
+            <Accordion
+              variant="activity"
+              value={importSections}
+              onValueChange={setImportSections}
+              items={[
+                {
+                  value: "old-buzz",
+                  title: "Not imported from old Buzz",
+                  content: importSections.includes("old-buzz") ? (
+                    <AgentImport
+                      key={importDestination}
+                      control={control}
+                      initialDestination={importDestination}
+                      managedAgents={state.data.agents}
+                      commitAvailable={
+                        state.status === "ready" &&
+                        state.data.importAvailable !== false
+                      }
+                      disabled={state.busy}
+                      onImported={(agents) => {
+                        setImportedId(agents[0]?.id ?? null);
+                        setImportSections([]);
+                      }}
+                    />
+                  ) : null,
+                },
+              ]}
+            />
+          )}
+        </>
       )}
       {adding && (
         <AgentCreateDialog

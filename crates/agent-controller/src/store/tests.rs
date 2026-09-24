@@ -402,9 +402,13 @@ fn instruction_adoption_is_cas_pinned_and_failure_preserves_previous_bytes() {
         baseline.composition.text(),
         include_str!("../../instructions/base.md")
     );
-    let mut selection = baseline.composition.clone();
-    selection.modules.retain(|m| m.plugin_id != "buzz.projects");
+    let mut selection = baseline.draft();
     selection
+        .composition
+        .modules
+        .retain(|m| m.plugin_id != "buzz.projects");
+    selection
+        .composition
         .plugins
         .iter_mut()
         .find(|p| p.id == "buzz.projects")
@@ -413,20 +417,18 @@ fn instruction_adoption_is_cas_pinned_and_failure_preserves_previous_bytes() {
     store.adopt_instructions(1, selection.clone()).unwrap();
     let saved = store.instructions().unwrap();
     assert_eq!(saved.revision, 2);
-    assert_eq!(saved.composition, selection);
+    assert_eq!(saved.draft(), selection);
     let before = fs::read(store.path()).unwrap();
-    assert!(store
-        .adopt_instructions(1, baseline.composition.clone())
-        .is_err());
+    assert!(store.adopt_instructions(1, baseline.draft()).is_err());
     assert_eq!(fs::read(store.path()).unwrap(), before);
     // Fail before replacing settings, without relying on chmod under privileged tests.
     fs::remove_file(dir.path().join("agents.previous.json")).unwrap();
     fs::create_dir(dir.path().join("agents.previous.json")).unwrap();
-    assert!(store.adopt_instructions(2, baseline.composition).is_err());
+    assert!(store.adopt_instructions(2, baseline.draft()).is_err());
     assert_eq!(fs::read(store.path()).unwrap(), before);
     drop(store);
     let reopened = Store::open(dir.path().to_owned()).unwrap();
-    assert_eq!(reopened.instructions().unwrap().composition, selection);
+    assert_eq!(reopened.instructions().unwrap().draft(), selection);
     assert_eq!(fs::read(reopened.path()).unwrap(), before);
 }
 
@@ -438,7 +440,7 @@ fn migrated_store_pins_once_and_missing_instructions_never_become_defaults() {
     let store = Store::open(dir.path().to_owned()).unwrap();
     assert_eq!(store.instructions().unwrap().revision, 1);
     let mut data: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    assert_eq!(data["version"], 2);
+    assert_eq!(data["version"], 3);
     assert_eq!(data["future"], "preserve");
     data.as_object_mut().unwrap().remove("instructions");
     fs::write(&path, serde_json::to_vec(&data).unwrap()).unwrap();
@@ -450,20 +452,121 @@ fn migrated_store_pins_once_and_missing_instructions_never_become_defaults() {
 }
 
 #[test]
+fn version_two_baseline_splits_metadata_without_changing_launch_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("agents.json");
+    let current = include_str!("../../instructions/base.md");
+    let incoming = current.find("## Incoming Turn Contract").unwrap();
+    let cli = current.find("## Buzz CLI").unwrap();
+    let legacy = format!("{}{}", &current[..incoming], &current[cli..]);
+    let projects = legacy.find("## Projects").unwrap();
+    let behavior = legacy.find("## Conversational Agent Creation").unwrap();
+    let plugins = ["buzz.agent-instructions", "buzz.projects"]
+        .into_iter()
+        .map(|id| crate::InstructionPlugin {
+            id: id.into(),
+            revision: "bundled".into(),
+            enabled: true,
+        })
+        .collect::<Vec<_>>();
+    let module =
+        |plugin: &str, id: &str, title: &str, order, text: &str| crate::InstructionModule {
+            key: format!("{plugin}/{id}"),
+            title: title.into(),
+            plugin_id: plugin.into(),
+            revision: "bundled".into(),
+            order,
+            text: text.into(),
+        };
+    let saved = crate::SavedInstructions {
+        revision: 7,
+        composition: crate::InstructionComposition {
+            modules: vec![
+                module(
+                    "buzz.agent-instructions",
+                    "before-projects",
+                    "Buzz and CLI",
+                    0,
+                    &legacy[..projects],
+                ),
+                module(
+                    "buzz.projects",
+                    "projects",
+                    "Projects",
+                    10,
+                    &legacy[projects..behavior],
+                ),
+                module(
+                    "buzz.agent-instructions",
+                    "after-projects",
+                    "Agent behavior",
+                    20,
+                    &legacy[behavior..],
+                ),
+            ],
+            plugins,
+        },
+        inactive_modules: Vec::new(),
+    };
+    let identity = saved.identity();
+    let mut instructions = serde_json::to_value(saved).unwrap();
+    instructions
+        .as_object_mut()
+        .unwrap()
+        .remove("inactiveModules");
+    fs::write(
+        &path,
+        serde_json::to_vec(&json!({
+            "version": 2,
+            "agents": [],
+            "instructions": instructions
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let store = Store::open(dir.path().to_owned()).unwrap();
+    let migrated = store.instructions().unwrap();
+    assert_eq!(migrated.revision, 7);
+    assert_eq!(migrated.identity(), identity);
+    assert_eq!(migrated.composition.text(), legacy);
+    assert_eq!(migrated.composition.modules.len(), 13);
+    assert!(migrated
+        .composition
+        .modules
+        .iter()
+        .all(|module| module.key != "buzz.agent-instructions/incoming-turn"));
+    let document: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    assert_eq!(document["version"], 3);
+}
+
+#[test]
 fn invalid_composition_is_rejected_without_persistence() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::open(dir.path().to_owned()).unwrap();
-    let baseline = store.instructions().unwrap().composition;
+    let baseline = store.instructions().unwrap().draft();
     let before = fs::read(store.path()).unwrap();
-    for failure in 0..6 {
+    for failure in 0..8 {
         let mut bad = baseline.clone();
         match failure {
-            0 => bad.modules.push(bad.modules[0].clone()),
-            1 => bad.modules[0].revision = "unmatched".into(),
-            2 => bad.modules[0].text = "x".repeat(1_048_577),
-            3 => bad.modules[0].text = "invalid\0text".into(),
-            4 => bad.modules.reverse(),
-            _ => bad.modules.clear(),
+            0 => bad
+                .composition
+                .modules
+                .push(bad.composition.modules[0].clone()),
+            1 => bad.composition.modules[0].revision = "unmatched".into(),
+            2 => bad.composition.modules[0].text = "x".repeat(1_048_577),
+            3 => bad.composition.modules[0].text = "invalid\0text".into(),
+            4 => bad.composition.modules.reverse(),
+            5 => bad.composition.modules.clear(),
+            6 => bad
+                .inactive_modules
+                .push(bad.composition.modules[0].clone()),
+            _ => {
+                let mut inactive = bad.composition.modules[0].clone();
+                inactive.key = format!("{}/inactive", inactive.plugin_id);
+                inactive.text = "invalid\0text".into();
+                bad.inactive_modules.push(inactive);
+            }
         }
         assert!(store.adopt_instructions(1, bad).is_err());
         assert_eq!(fs::read(store.path()).unwrap(), before);

@@ -530,14 +530,14 @@ pub(crate) async fn agent_control_delete(
 pub(crate) async fn agent_control_adopt_instructions(
     state: tauri::State<'_, AgentHost>,
     expected_revision: u64,
-    composition: buzz_agent_controller::InstructionComposition,
+    draft: buzz_agent_controller::InstructionDraft,
 ) -> Result<Snapshot, String> {
     run(state.inner().clone(), move |host| {
         // Invalidate credential waits even if persistence returns an uncertain error.
         // A late key must not start with instructions different from its request.
         host.starts.clear();
         host.controller
-            .adopt_instructions(expected_revision, composition)?;
+            .adopt_instructions(expected_revision, draft)?;
         host.snapshot()
     })
     .await

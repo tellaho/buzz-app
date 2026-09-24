@@ -38,6 +38,111 @@ async function openEditor(page, name = "Fixture agent") {
   return dialog;
 }
 
+test("base prompt traits edit, retain, reorder and apply without restarting", async ({
+  page,
+}) => {
+  const server = await createServer({
+    ...config,
+    configFile: false,
+    logLevel: "error",
+    server: { host: "127.0.0.1", port: 0, strictPort: false },
+  });
+  await server.listen();
+  try {
+    await page.goto(
+      `http://127.0.0.1:${server.httpServer.address().port}/tests/fixtures/agent-control.html`,
+    );
+    await page.getByRole("tab", { name: "Base prompt", exact: true }).click();
+    const builder = page.getByRole("region", { name: "Base prompt builder" });
+    const active = builder.getByRole("region", { name: "Your base prompt" });
+    await expect(active.getByText("3 active traits")).toBeVisible();
+
+    const handle = active.getByRole("button", {
+      name: "Drag Buzz identity to reorder",
+    });
+    const target = active
+      .getByRole("button", { name: "Edit Threading" })
+      .locator("xpath=ancestor::li");
+    const [handleBox, targetBox] = await Promise.all([
+      handle.boundingBox(),
+      target.boundingBox(),
+    ]);
+    await page.mouse.move(
+      handleBox.x + handleBox.width / 2,
+      handleBox.y + handleBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      targetBox.x + targetBox.width / 2,
+      targetBox.y + targetBox.height - 2,
+      { steps: 6 },
+    );
+    await page.mouse.up();
+    await expect
+      .poll(() =>
+        active
+          .locator("[data-trait-key]")
+          .evaluateAll((rows) => rows.map((row) => row.dataset.traitKey)),
+      )
+      .toEqual([
+        "buzz.agent-instructions/threading",
+        "buzz.agent-instructions/buzz-identity",
+        "buzz.agent-instructions/engineering-discipline",
+      ]);
+
+    await active
+      .getByRole("button", { name: "Move Buzz identity down" })
+      .click();
+    await active.getByRole("button", { name: "Edit Threading" }).click();
+    const editor = page.getByRole("dialog", { name: "Edit Threading" });
+    await editor
+      .getByRole("textbox", { name: "Instructions" })
+      .fill("## Threading\n\nPrefer shallow human threads.");
+    await editor.getByRole("button", { name: "Save trait" }).click();
+
+    await active
+      .getByRole("button", { name: "Remove Engineering discipline" })
+      .click();
+    const available = builder.getByRole("region", { name: "Available traits" });
+    await expect(available.getByText("Engineering discipline")).toBeVisible();
+    await available.getByRole("button", { name: "New trait" }).click();
+    const create = page.getByRole("dialog", { name: "Create trait" });
+    await create.getByRole("textbox", { name: "Trait name" }).fill("Curiosity");
+    await create
+      .getByRole("textbox", { name: "Instructions" })
+      .fill("Ask one useful question before assuming intent.");
+    await create.getByRole("button", { name: "Save trait" }).click();
+
+    await builder.getByRole("button", { name: "Apply base prompt" }).click();
+    await expect(builder.getByRole("status")).toContainText("Saved revision 2");
+    await expect(builder.getByRole("status")).toContainText(
+      "1 running agent needs restart",
+    );
+    expect(
+      await page.evaluate(
+        () =>
+          window.agentControlFixture.calls.filter(
+            (call) => call.action === "adopt-instructions",
+          ).length,
+      ),
+    ).toBe(1);
+
+    await page.setViewportSize({ width: 700, height: 900 });
+    const [activeBox, availableBox] = await Promise.all([
+      active.boundingBox(),
+      available.boundingBox(),
+    ]);
+    expect(availableBox.y).toBeGreaterThan(activeBox.y + activeBox.height - 1);
+    await page.getByRole("button", { name: "Toggle appearance" }).click();
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-color-mode",
+      "dark",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
 test("local controls preserve drafts, confirm operations and distinguish disabled from sleeping", async ({
   page,
 }) => {

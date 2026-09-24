@@ -202,16 +202,20 @@ containment on non-Unix platforms.
 ## App-owned base instructions
 
 The native controller embeds `crates/agent-controller/instructions/base.md`, an
-unchanged import from Buzz revision `84b0fd04b7831657df2873c3a835412f47cebb03`.
+unchanged import from Buzz revision `deda09c18c78d48847b032557c331f28faf64ee8`.
 The adjacent `source.json` records the original path, byte count and SHA-256.
 This is an ownership transfer, not automatic inheritance on runtime upgrades.
 
-The first controller open migrates version-1 storage to a version-2 document with
-that exact baseline. Its three ordered modules preserve the original bytes:
-Buzz/CLI, Projects, and the remaining agent behavior. Future app/plugin upgrades
-never regenerate saved content. A missing or malformed version-2 composition
-blocks use rather than silently replacing it with defaults. Migration retains
-unknown document/agent fields and uses the existing private atomic-write path.
+The first controller open migrates version-1 storage to a version-3 document with
+that exact baseline. Fourteen ordered traits preserve the source bytes while
+giving identity, turn routing, CLI, project, communication, memory and engineering
+behaviors independent ownership. Version-2 profiles whose frozen three-module
+baseline is recognized are split metadata-only: their revision, concatenated
+bytes and launch hash do not change, and the newer incoming-turn trait is merely
+available until explicitly added. Unknown or modified legacy modules remain
+intact. A missing or malformed retained composition blocks use rather than
+silently replacing it with defaults. Migration retains unknown document/agent
+fields and uses the existing private atomic-write path.
 
 The existing plugin lifecycle supplies **proposals**, not execution state.
 `agentInstructions.register({ id, title, order, text })` namespaces each contribution
@@ -221,13 +225,17 @@ section. Disabled Projects is absent from the proposal. Incomplete/failed plugin
 activation blocks adoption rather than silently omitting unavailable text.
 
 **Settings → Plugins** changes plugin availability; it does not atomically change
-native agent instructions. **Agents → Base instructions** shows proposed and saved
-text, module sources and a rough token estimate. **Apply base instructions** is the
-explicit second step: native validates ordering, metadata, bounds and selected
+native agent instructions. **Agents → Base prompt** is a staged character builder:
+active traits can be edited, removed and reordered; removed traits stay available;
+and profile-local custom traits use the reserved `buzz.local-instructions` source.
+Source traits can be reset to their current proposal, while inactive custom traits
+can also be deleted. **Apply base prompt** is the explicit second step: native
+validates active and inactive metadata, uniqueness, ordering, bounds and selected
 plugin revisions, then compare-and-swap saves exact bytes. The UI does not claim
-adoption until native confirms it. Failed/uncertain writes require a fresh read
-before retry; no automatic restart occurs. These defaults cover all local agents
-and communities in this app profile, not a selected relay identity.
+adoption until native confirms it. Failed/uncertain writes retain the draft and
+require a fresh read before retry; no automatic restart occurs. These defaults
+cover all local agents and communities in this app profile, not a selected relay
+identity.
 
 Every Start/Restart (including enabled-agent restoration and mention-start)
 materializes the **retained native composition**, without requiring React/plugin
@@ -244,9 +252,9 @@ start an agent using instructions different from that request. Confirmed teardow
 removes the launch directory. These identities/file bytes are launch evidence,
 **not** retained per-session delivery receipts or proof of model compliance.
 
-This slice has review/apply, not the full module editor, custom overrides or
-per-agent base selections. Deep threading still requires a runtime reply-policy
-hook; shared instruction sets and retained per-session Activity remain deferred.
+Per-agent base selections, variant families and cross-profile trait syncing remain
+deferred. Deep threading still requires a runtime reply-policy hook; retained
+per-session Activity also remains deferred.
 
 ## Ownership and handoff
 

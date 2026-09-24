@@ -1732,17 +1732,19 @@ fn projects_selection_survives_cold_restore_without_frontend_and_requires_restar
         (text.lines().count() == 10).then_some(())
     });
     let original = fs::read_to_string(dir.path().join("received-base")).unwrap();
-    let mut selection = controller.store.instructions().unwrap().composition;
+    let mut selection = controller.store.instructions().unwrap().draft();
     selection
+        .composition
         .modules
         .retain(|module| module.plugin_id != "buzz.projects");
     selection
+        .composition
         .plugins
         .iter_mut()
         .find(|p| p.id == "buzz.projects")
         .unwrap()
         .enabled = false;
-    let expected = selection.text();
+    let expected = selection.composition.text();
     let saved = controller.adopt_instructions(1, selection).unwrap();
     assert_eq!(
         saved.agents[0]
@@ -1787,7 +1789,7 @@ fn projects_selection_survives_cold_restore_without_frontend_and_requires_restar
         restored.agents[0].saved_instructions
     );
     controller
-        .adopt_instructions(2, crate::SavedInstructions::baseline().composition)
+        .adopt_instructions(2, crate::SavedInstructions::baseline().draft())
         .unwrap();
     let restarted = controller.action(&a.id, Action::Restart).unwrap();
     wait_for_contents(&dir.path().join("starts"), |text| {

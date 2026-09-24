@@ -59,8 +59,16 @@ impl Store {
         if document.version == 1 {
             // One-time adoption of the frozen carryover. Later app/plugin updates
             // never regenerate persisted bytes during startup.
-            document.version = 2;
+            document.version = 3;
             document.instructions = Some(crate::SavedInstructions::baseline());
+            store.write(&document)?;
+        } else if document.version == 2 {
+            if let Some(instructions) = &mut document.instructions {
+                crate::instruction_composition::migrate_legacy_modules(instructions)?;
+            }
+            // Splitting a recognized baseline changes metadata only: revision,
+            // materialized bytes and the launch identity hash stay unchanged.
+            document.version = 3;
             store.write(&document)?;
         }
         Ok(store)
@@ -154,9 +162,9 @@ impl Store {
     pub(crate) fn adopt_instructions(
         &mut self,
         expected_revision: u64,
-        composition: crate::InstructionComposition,
+        draft: crate::InstructionDraft,
     ) -> Result<()> {
-        composition.validate()?;
+        draft.validate()?;
         let mut doc = self.read()?;
         let saved = doc
             .instructions
@@ -165,7 +173,7 @@ impl Store {
         if saved.revision != expected_revision {
             return Err("Base instructions changed; refresh before applying your selection".into());
         }
-        if saved.composition == composition {
+        if saved.draft() == draft {
             return Ok(());
         }
         saved.revision = saved
@@ -173,7 +181,8 @@ impl Store {
             .checked_add(1)
             .filter(|n| *n <= 9_007_199_254_740_991)
             .ok_or("Instruction revision exhausted")?;
-        saved.composition = composition;
+        saved.composition = draft.composition;
+        saved.inactive_modules = draft.inactive_modules;
         self.write(&doc)
     }
     pub fn save(&mut self, id: &str, revision: u64, edit: AgentEdit) -> Result<()> {
@@ -252,10 +261,10 @@ impl Drop for Store {
     }
 }
 fn validate(doc: &Document) -> Result<()> {
-    if !matches!(doc.version, 1 | 2) || doc.agents.len() > MAX_AGENTS {
+    if !matches!(doc.version, 1 | 2 | 3) || doc.agents.len() > MAX_AGENTS {
         return Err("Unsupported agent storage version or size; left unchanged".into());
     }
-    if doc.version == 2 && doc.instructions.is_none() {
+    if matches!(doc.version, 2 | 3) && doc.instructions.is_none() {
         return Err("Saved base instructions are missing; left unchanged".into());
     }
     if let Some(instructions) = &doc.instructions {

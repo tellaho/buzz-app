@@ -2,7 +2,7 @@
 // Keep injection reachable from the generated author contract, not host construction.
 import type {} from "@deepseek-ai/cordis";
 import type {
-  InstructionComposition,
+  InstructionDraft,
   InstructionIdentity,
   SavedInstructions,
 } from "../agent-instructions/service";
@@ -123,7 +123,7 @@ export interface AgentControlHost {
   models?: ModelHost;
   adoptInstructions?(
     expectedRevision: number,
-    composition: InstructionComposition,
+    draft: InstructionDraft,
   ): Promise<ControlSnapshot>;
   prepareCreate?(
     requestId: string,
@@ -386,14 +386,11 @@ export function createAgentControl(
       : {}),
     ...(host?.adoptInstructions
       ? {
-          adoptInstructions: (
-            revision: number,
-            composition: InstructionComposition,
-          ) =>
+          adoptInstructions: (revision: number, draft: InstructionDraft) =>
             run((native) => {
               if (!native.adoptInstructions)
                 throw new Error("Instruction adoption is unavailable.");
-              return native.adoptInstructions(revision, composition);
+              return native.adoptInstructions(revision, draft);
             }, ready),
         }
       : {}),

@@ -102,7 +102,7 @@ it("composes the exact carryover and removes/restores Projects with plugin lifec
   await manager.change("disable", "buzz.projects");
   await vi.waitFor(() => {
     expect(service.snapshot().error).toBeNull();
-    expect(service.snapshot().composition.modules).toHaveLength(2);
+    expect(service.snapshot().composition.modules).toHaveLength(13);
     expect(projectPage()).toBeUndefined();
   });
   expect(
@@ -115,10 +115,10 @@ it("composes the exact carryover and removes/restores Projects with plugin lifec
     service.snapshot().composition.plugins.find((p) => p.id === "buzz.projects")
       ?.enabled,
   ).toBe(false);
-  expect(snapshot.modules).toHaveLength(3); // old captured proposal cannot mutate
+  expect(snapshot.modules).toHaveLength(14); // old captured proposal cannot mutate
   await manager.change("enable", "buzz.projects");
   await vi.waitFor(() =>
-    expect(service.snapshot().composition.modules).toHaveLength(3),
+    expect(service.snapshot().composition.modules).toHaveLength(14),
   );
   expect(projectPage()).toMatchObject({
     handlesNavigation: true,

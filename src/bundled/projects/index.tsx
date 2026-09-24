@@ -8,7 +8,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ctx.agentInstructions.register({
     id: "projects",
     title: "Projects",
-    order: 10,
+    order: 30,
     text: instructions,
   });
   ctx.pages.register({

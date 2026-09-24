@@ -506,10 +506,9 @@ impl Controller {
     pub fn adopt_instructions(
         &mut self,
         expected_revision: u64,
-        composition: crate::InstructionComposition,
+        draft: crate::InstructionDraft,
     ) -> Result<ControlSnapshot> {
-        self.store
-            .adopt_instructions(expected_revision, composition)?;
+        self.store.adopt_instructions(expected_revision, draft)?;
         self.snapshot()
     }
     pub fn save(&mut self, id: &str, revision: u64, edit: AgentEdit) -> Result<ControlSnapshot> {

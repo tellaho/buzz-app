@@ -778,7 +778,10 @@ async fn native_start_restore_disconnect_stop_and_quit_fence_late_credentials() 
                 "agent_control_adopt_instructions",
                 json!({
                     "expectedRevision": snapshot["instructions"]["revision"],
-                    "composition": snapshot["instructions"]["composition"]
+                    "draft": {
+                        "composition": snapshot["instructions"]["composition"],
+                        "inactiveModules": snapshot["instructions"]["inactiveModules"]
+                    }
                 }),
             )
             .unwrap();
@@ -1107,7 +1110,10 @@ fn real_ipc_instruction_adoption_is_durable_cas_and_fences_pending_starts() {
         Ok(())
     })
     .unwrap();
-    let request = json!({"expectedRevision":1,"composition":composition});
+    let request = json!({
+        "expectedRevision":1,
+        "draft": {"composition":composition,"inactiveModules":[]}
+    });
     let saved = invoke(&view, "agent_control_adopt_instructions", request.clone()).unwrap();
     assert_eq!(saved["instructions"]["revision"], 2);
     assert_eq!(saved["instructions"]["composition"], composition);
@@ -1128,7 +1134,11 @@ fn real_ipc_instruction_adoption_is_durable_cas_and_fences_pending_starts() {
         &view,
         "agent_control_adopt_instructions",
         json!({
-            "expectedRevision":2,"composition":before["instructions"]["composition"]
+            "expectedRevision":2,
+            "draft": {
+                "composition":before["instructions"]["composition"],
+                "inactiveModules":before["instructions"]["inactiveModules"]
+            }
         })
     )
     .is_err());

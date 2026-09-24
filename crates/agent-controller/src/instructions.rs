@@ -51,7 +51,7 @@ mod tests {
         assert_eq!(source["repository"], "https://github.com/block/buzz");
         assert_eq!(
             source["revision"],
-            "84b0fd04b7831657df2873c3a835412f47cebb03"
+            "deda09c18c78d48847b032557c331f28faf64ee8"
         );
         assert_eq!(source["path"], "crates/buzz-acp/src/base_prompt.md");
         assert_eq!(source["bytes"], BASE.len());

@@ -19,6 +19,12 @@ export type InstructionComposition = {
 export type SavedInstructions = {
   revision: number;
   composition: InstructionComposition;
+  /** Missing only when an older running native host has not migrated yet. */
+  inactiveModules?: readonly SavedModule[];
+};
+export type InstructionDraft = {
+  composition: InstructionComposition;
+  inactiveModules: readonly SavedModule[];
 };
 export type InstructionIdentity = { revision: number; sha256: string };
 export type InstructionProposal = {

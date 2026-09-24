@@ -1,7 +1,7 @@
 {
   "repository": "https://github.com/block/buzz",
-  "revision": "84b0fd04b7831657df2873c3a835412f47cebb03",
+  "revision": "deda09c18c78d48847b032557c331f28faf64ee8",
   "path": "crates/buzz-acp/src/base_prompt.md",
-  "sha256": "f17b163d32c9fd05f8d8e677fb7ccadafbe5f389422ef1c17ae01ad3e33873ae",
-  "bytes": 16869
+  "sha256": "311f7593896e6c4d8ce20514dc8c843161e439c96f246047faf068c1648562dd",
+  "bytes": 17771
 }

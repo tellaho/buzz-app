@@ -64,6 +64,11 @@ export const DotsThreeVerticalIcon = defineIcon(
   "phosphor",
   PhosphorDotsThreeVerticalIcon,
 );
+import { DotsSixVerticalIcon as PhosphorDotsSixVerticalIcon } from "@phosphor-icons/react/dist/csr/DotsSixVertical";
+export const DotsSixVerticalIcon = defineIcon(
+  "phosphor",
+  PhosphorDotsSixVerticalIcon,
+);
 import { DownloadIcon as PhosphorDownloadIcon } from "@phosphor-icons/react/dist/csr/Download";
 export const DownloadIcon = defineIcon("phosphor", PhosphorDownloadIcon);
 import { DropboxLogoIcon as PhosphorDropboxLogoIcon } from "@phosphor-icons/react/dist/csr/DropboxLogo";
