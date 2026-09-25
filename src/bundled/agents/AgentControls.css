@@ -104,6 +104,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.base-prompt-trait-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .base-prompt-trait-actions {
   display: flex;
   flex: none;

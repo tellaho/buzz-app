@@ -17,6 +17,7 @@ import type {
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  DotsThreeIcon,
   DotsSixVerticalIcon,
   PencilSimpleIcon,
   PlusIcon,
@@ -28,6 +29,13 @@ import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { Field } from "../../shared/design-system/ui/Field";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Input } from "../../shared/design-system/ui/Input";
+import {
+  MenuIcon,
+  MenuItem,
+  MenuPopup,
+  MenuRoot,
+  MenuTrigger,
+} from "../../shared/design-system/ui/Menu";
 import { Textarea } from "../../shared/design-system/ui/Textarea";
 import {
   availableInstructionModules,
@@ -306,53 +314,81 @@ function BaseInstructionBuilder({
                   onPointerUp={pointerUp}
                   onPointerCancel={stopDrag}
                 />
-                <TraitText module={module} />
+                <button
+                  type="button"
+                  className="base-prompt-trait-title text-label"
+                  onClick={() => edit(module, "active")}
+                >
+                  {module.title}
+                </button>
                 <div className="base-prompt-trait-actions">
-                  <IconButton
-                    size="compact"
-                    aria-label={`Move ${module.title} up`}
-                    disabled={index === 0}
-                    icon={<ArrowUpIcon size={16} aria-hidden="true" />}
-                    onClick={() => move(index, index - 1)}
-                  />
-                  <IconButton
-                    size="compact"
-                    aria-label={`Move ${module.title} down`}
-                    disabled={index === draft.composition.modules.length - 1}
-                    icon={<ArrowDownIcon size={16} aria-hidden="true" />}
-                    onClick={() => move(index, index + 1)}
-                  />
-                  <IconButton
-                    size="compact"
-                    aria-label={`Edit ${module.title}`}
-                    icon={<PencilSimpleIcon size={16} aria-hidden="true" />}
-                    onClick={() => edit(module, "active")}
-                  />
-                  <IconButton
-                    size="compact"
-                    aria-label={`Remove ${module.title}`}
-                    disabled={draft.composition.modules.length === 1}
-                    icon={<TrashIcon size={16} aria-hidden="true" />}
-                    onClick={() =>
-                      mutate((current) => ({
-                        ...current,
-                        composition: {
-                          ...current.composition,
-                          modules: normalizedModules(
-                            current.composition.modules.filter(
-                              (candidate) => candidate.key !== module.key,
-                            ),
-                          ),
-                        },
-                        inactiveModules: [
-                          ...current.inactiveModules.filter(
-                            (candidate) => candidate.key !== module.key,
-                          ),
-                          module,
-                        ],
-                      }))
-                    }
-                  />
+                  <MenuRoot>
+                    <MenuTrigger
+                      render={
+                        <IconButton
+                          size="compact"
+                          aria-label={`Actions for ${module.title}`}
+                          icon={<DotsThreeIcon size={16} aria-hidden="true" />}
+                        />
+                      }
+                    />
+                    <MenuPopup align="end" size="compact">
+                      <MenuItem onClick={() => edit(module, "active")}>
+                        <MenuIcon>
+                          <PencilSimpleIcon size={16} />
+                        </MenuIcon>
+                        Edit
+                      </MenuItem>
+                      <MenuItem
+                        disabled={index === 0}
+                        onClick={() => move(index, index - 1)}
+                      >
+                        <MenuIcon>
+                          <ArrowUpIcon size={16} />
+                        </MenuIcon>
+                        Move up
+                      </MenuItem>
+                      <MenuItem
+                        disabled={
+                          index === draft.composition.modules.length - 1
+                        }
+                        onClick={() => move(index, index + 1)}
+                      >
+                        <MenuIcon>
+                          <ArrowDownIcon size={16} />
+                        </MenuIcon>
+                        Move down
+                      </MenuItem>
+                      <MenuItem
+                        tone="danger"
+                        disabled={draft.composition.modules.length === 1}
+                        onClick={() => {
+                          mutate((current) => ({
+                            ...current,
+                            composition: {
+                              ...current.composition,
+                              modules: normalizedModules(
+                                current.composition.modules.filter(
+                                  (candidate) => candidate.key !== module.key,
+                                ),
+                              ),
+                            },
+                            inactiveModules: [
+                              ...current.inactiveModules.filter(
+                                (candidate) => candidate.key !== module.key,
+                              ),
+                              module,
+                            ],
+                          }));
+                        }}
+                      >
+                        <MenuIcon>
+                          <TrashIcon size={16} />
+                        </MenuIcon>
+                        Remove
+                      </MenuItem>
+                    </MenuPopup>
+                  </MenuRoot>
                 </div>
               </li>
             ))}

@@ -7,6 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 import { BaseInstructions } from "./BaseInstructions";
 import type {
   AgentInstructions,
@@ -39,7 +40,7 @@ const instructions: AgentInstructions = {
   subscribe: () => () => {},
 };
 function editCore(text: string) {
-  fireEvent.click(screen.getByRole("button", { name: "Edit Core" }));
+  fireEvent.click(screen.getByRole("button", { name: "Core" }));
   fireEvent.change(screen.getByLabelText("Instructions"), {
     target: { value: text },
   });
@@ -82,7 +83,7 @@ it("requires explicit adoption, retains saved state on failure and never restart
   }
   render(<Harness />);
   expect(host.adoptInstructions).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Edit Core" }));
+  fireEvent.click(screen.getByRole("button", { name: "Core" }));
   expect(
     (screen.getByLabelText("Instructions") as HTMLTextAreaElement).value,
   ).toBe("saved instructions");
@@ -192,6 +193,7 @@ it("shows adoption only after native confirmation and leaves restart explicit", 
 });
 
 it("stages accessible reordering, retained removal and custom trait creation", async () => {
+  const user = userEvent.setup();
   const firstProposal = proposal.composition.modules[0];
   if (!firstProposal) throw new Error("Expected fixture proposal");
   const secondProposal: InstructionProposal = {
@@ -243,13 +245,25 @@ it("stages accessible reordering, retained removal and custom trait creation", a
   }
   const view = render(<Harness />);
 
-  fireEvent.click(screen.getByRole("button", { name: "Move Core down" }));
+  expect(screen.queryByText("proposed instructions")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Core" }));
+  expect(screen.getByRole("dialog", { name: "Edit Core" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+  await user.click(screen.getByRole("button", { name: "Actions for Core" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+  expect(screen.getByRole("dialog", { name: "Edit Core" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+  await user.click(screen.getByRole("button", { name: "Actions for Core" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Move down" }));
   expect(
     [...view.container.querySelectorAll("[data-trait-key]")].map((row) =>
       row.getAttribute("data-trait-key"),
     ),
   ).toEqual(["fixture/second", "fixture/core"]);
-  fireEvent.click(screen.getByRole("button", { name: "Remove Second" }));
+  await user.click(screen.getByRole("button", { name: "Actions for Second" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Remove" }));
   expect(screen.getByRole("button", { name: "Add" })).toBeTruthy();
 
   fireEvent.click(screen.getByRole("button", { name: "New trait" }));
@@ -260,8 +274,11 @@ it("stages accessible reordering, retained removal and custom trait creation", a
     target: { value: "Ask one useful question." },
   });
   fireEvent.click(screen.getByRole("button", { name: "Save trait" }));
-  expect(screen.getByRole("button", { name: "Edit Curiosity" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Remove Curiosity" }));
+  expect(screen.getByRole("button", { name: "Curiosity" })).toBeTruthy();
+  await user.click(
+    screen.getByRole("button", { name: "Actions for Curiosity" }),
+  );
+  await user.click(await screen.findByRole("menuitem", { name: "Remove" }));
   expect(screen.getByRole("button", { name: "Delete Curiosity" })).toBeTruthy();
   control.dispose();
 });
