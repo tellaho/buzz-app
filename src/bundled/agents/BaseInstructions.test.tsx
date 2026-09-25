@@ -349,10 +349,27 @@ it("stages accessible reordering, retained removal and custom trait creation", a
   await user.click(screen.getByRole("button", { name: "Core" }));
   expect(screen.getByRole("dialog", { name: "Edit Core" })).toBeTruthy();
   expect(board).toHaveAttribute("data-has-selection", "true");
-  expect(
-    screen.getByRole("button", { name: "Core" }).closest("[data-trait-key]"),
-  ).toHaveAttribute("data-selected", "true");
+  const selectedCore = screen
+    .getByRole("button", { name: "Core" })
+    .closest<HTMLElement>("[data-trait-key]");
+  expect(selectedCore).toHaveAttribute("data-selected", "true");
   expect(screen.getByRole("textbox", { name: "Trait name" })).toHaveFocus();
+  const instructions = screen.getByRole("textbox", { name: "Instructions" });
+  fireEvent.pointerDown(instructions, {
+    button: 0,
+    clientX: 10,
+    clientY: 10,
+    isPrimary: true,
+    pointerId: 6,
+  });
+  fireEvent.pointerMove(instructions, {
+    clientX: 30,
+    clientY: 30,
+    isPrimary: true,
+    pointerId: 6,
+  });
+  expect(selectedCore).not.toHaveAttribute("data-dragging");
+  fireEvent.pointerUp(instructions, { pointerId: 6 });
   await user.click(screen.getByRole("button", { name: "Cancel" }));
   expect(board).not.toHaveAttribute("data-has-selection");
   expect(screen.getByRole("button", { name: "Core" })).toHaveFocus();

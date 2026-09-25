@@ -433,7 +433,7 @@ function BaseInstructionBuilder({
     setEditor(null);
   };
   const editorPanel = editor && (
-    <div className="base-prompt-editor">
+    <div className="base-prompt-editor" data-trait-no-drag>
       <header className="base-prompt-editor-header">
         <div className="min-w-0">
           <PopoverTitle>
