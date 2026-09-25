@@ -68,7 +68,9 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
     await page.getByRole("tab", { name: "Base prompt", exact: true }).click();
     const builder = page.getByRole("region", { name: "Base prompt builder" });
     const active = builder.getByRole("region", { name: "Base prompt traits" });
-    await expect(active.getByText("3 active traits")).toBeVisible();
+    await expect(active.getByText("Active traits").locator("..")).toContainText(
+      "3",
+    );
     const [builderBox, activeBox] = await Promise.all([
       builder.boundingBox(),
       active.boundingBox(),
@@ -83,8 +85,109 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
     await expect(
       active.getByRole("img", { name: "Plugin category" }),
     ).toBeVisible();
+    // Browser-only: CSS grid geometry and Base UI's computed collision side are
+    // layout contracts that a DOM emulator cannot establish.
+    const board = active.getByRole("list", {
+      name: "Prompt traits in sequence",
+    });
+    const addTrait = active.getByRole("button", { name: "Add trait" });
+    const [boardGeometry, addGeometry] = await Promise.all([
+      board.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          left: bounds.left,
+          bottom: bounds.bottom,
+          cell: Number.parseFloat(
+            style.getPropertyValue("--base-prompt-board-cell"),
+          ),
+          columns: Number.parseInt(
+            style.getPropertyValue("--base-prompt-board-columns"),
+            10,
+          ),
+          gap: Number.parseFloat(style.columnGap),
+          traits: Array.from(
+            element.querySelectorAll(":scope > [data-trait-key]"),
+            (trait) => {
+              const traitBounds = trait.getBoundingClientRect();
+              return {
+                left: traitBounds.left,
+                right: traitBounds.right,
+                top: traitBounds.top,
+                bottom: traitBounds.bottom,
+              };
+            },
+          ),
+        };
+      }),
+      addTrait.boundingBox(),
+    ]);
+    expect(Math.abs(addGeometry.width - boardGeometry.cell)).toBeLessThan(1);
+    expect(Math.abs(addGeometry.height - boardGeometry.cell)).toBeLessThan(1);
+    const firstOpenColumn = Array.from(
+      { length: boardGeometry.columns },
+      (_, index) =>
+        boardGeometry.left + index * (boardGeometry.cell + boardGeometry.gap),
+    ).find((left) =>
+      boardGeometry.traits.every(
+        (trait) =>
+          trait.right <= left + 0.5 ||
+          trait.left >= left + boardGeometry.cell - 0.5 ||
+          trait.bottom <= addGeometry.y + 0.5 ||
+          trait.top >= addGeometry.y + addGeometry.height - 0.5,
+      ),
+    );
+    expect(firstOpenColumn).toBeDefined();
+    expect(Math.abs(addGeometry.x - firstOpenColumn)).toBeLessThan(1);
+    expect(addGeometry.y + addGeometry.height).toBeLessThan(
+      boardGeometry.bottom - 1,
+    );
+
+    const placements = await board
+      .locator("[data-trait-key]")
+      .evaluateAll((tiles) => {
+        const boardBounds = tiles[0].parentElement.getBoundingClientRect();
+        const middle = boardBounds.left + boardBounds.width / 2;
+        return tiles.map((tile) => {
+          const bounds = tile.getBoundingClientRect();
+          return {
+            title: tile
+              .querySelector(".base-prompt-trait-open")
+              .getAttribute("aria-label"),
+            side: bounds.left + bounds.width / 2 <= middle ? "right" : "left",
+          };
+        });
+      });
+    const leftHalf = placements.find(({ side }) => side === "right");
+    const rightHalf = placements.find(({ side }) => side === "left");
+    expect(leftHalf).toBeTruthy();
+    expect(rightHalf).toBeTruthy();
+    for (const placement of [leftHalf, rightHalf]) {
+      const trigger = active.getByRole("button", {
+        name: placement.title,
+        exact: true,
+      });
+      await trigger.click();
+      const traitEditor = page.getByRole("dialog", {
+        name: `Edit ${placement.title}`,
+      });
+      await expect(traitEditor).toHaveAttribute("data-side", placement.side);
+      await expect(trigger.locator("xpath=ancestor::li")).toHaveCSS(
+        "opacity",
+        "1",
+      );
+      await expect(board.locator("li:not([data-selected])").first()).toHaveCSS(
+        "opacity",
+        "0.35",
+      );
+      await traitEditor.getByRole("button", { name: "Cancel" }).click();
+      await expect(trigger).toBeFocused();
+      await expect(board.locator("li").first()).toHaveCSS("opacity", "1");
+    }
+
     await active.getByRole("button", { name: "Add trait" }).click();
     let available = page.getByRole("dialog", { name: "Available traits" });
+    await expect(available).toHaveAttribute("data-side", "left");
     await expect(
       available.getByRole("img", { name: "Custom category" }),
     ).toBeVisible();
@@ -151,11 +254,34 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
       .fill("Ask one useful question before assuming intent.");
     await create.getByRole("button", { name: "Save trait" }).click();
 
-    await builder.getByRole("button", { name: "Apply base prompt" }).click();
-    await expect(builder.getByRole("status")).toContainText("Saved revision 2");
-    await expect(builder.getByRole("status")).toContainText(
-      "1 running agent needs restart",
-    );
+    const applyBasePrompt = builder.getByRole("button", {
+      name: "Apply base prompt",
+    });
+    expect(
+      await applyBasePrompt.evaluate((button) => ({
+        disabled: button.disabled,
+        busy: button.getAttribute("aria-busy"),
+      })),
+    ).toEqual({ disabled: false, busy: null });
+    await applyBasePrompt.click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.agentControlFixture.calls.filter(
+              (call) => call.action === "adopt-instructions",
+            ).length,
+        ),
+      )
+      .toBe(1);
+    await expect(
+      builder.getByText(
+        "Base prompt applied. Running agents were not restarted.",
+      ),
+    ).toBeAttached();
+    await expect(
+      active.getByText("Running agents to restart").locator(".."),
+    ).toContainText("1");
     const adoption = await page.evaluate(() =>
       window.agentControlFixture.calls.filter(
         (call) => call.action === "adopt-instructions",

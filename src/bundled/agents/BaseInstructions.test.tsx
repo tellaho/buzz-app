@@ -339,16 +339,32 @@ it("stages accessible reordering, retained removal and custom trait creation", a
     ),
   ).toBe(true);
   expect(
+    within(board)
+      .getByRole("button", { name: "Add trait" })
+      .closest(".base-prompt-add-row"),
+  ).toBeTruthy();
+  expect(
     screen.getByRole("list", { name: "Approximate prompt cost by category" }),
   ).toHaveTextContent(/Plugin\s*~10\s*·\s*100%/);
   await user.click(screen.getByRole("button", { name: "Core" }));
   expect(screen.getByRole("dialog", { name: "Edit Core" })).toBeTruthy();
+  expect(board).toHaveAttribute("data-has-selection", "true");
+  expect(
+    screen.getByRole("button", { name: "Core" }).closest("[data-trait-key]"),
+  ).toHaveAttribute("data-selected", "true");
+  expect(screen.getByRole("textbox", { name: "Trait name" })).toHaveFocus();
   await user.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(board).not.toHaveAttribute("data-has-selection");
+  expect(screen.getByRole("button", { name: "Core" })).toHaveFocus();
 
   await user.click(screen.getByRole("button", { name: "Actions for Core" }));
   await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
   expect(screen.getByRole("dialog", { name: "Edit Core" })).toBeTruthy();
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Trait name" })).toHaveFocus(),
+  );
   await user.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.getByRole("button", { name: "Core" })).toHaveFocus();
 
   const coreRow = screen
     .getByRole("button", { name: "Core" })
@@ -427,6 +443,12 @@ it("stages accessible reordering, retained removal and custom trait creation", a
   await user.click(screen.getByRole("button", { name: "Actions for Second" }));
   await user.click(await screen.findByRole("menuitem", { name: "Remove" }));
   await user.click(screen.getByRole("button", { name: "Add trait" }));
+  expect(board).toHaveAttribute("data-has-selection", "true");
+  expect(
+    within(board)
+      .getByRole("button", { name: "Add trait" })
+      .closest(".base-prompt-add-row"),
+  ).toHaveAttribute("data-selected", "true");
   const availableMenu = await screen.findByRole("dialog", {
     name: "Available traits",
   });
@@ -438,6 +460,14 @@ it("stages accessible reordering, retained removal and custom trait creation", a
   fireEvent.click(
     within(availableMenu).getByRole("button", { name: "New trait" }),
   );
+  expect(screen.getByRole("dialog", { name: "Create trait" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(
+    within(
+      await screen.findByRole("dialog", { name: "Available traits" }),
+    ).getByRole("button", { name: "New trait" }),
+  ).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "New trait" }));
   fireEvent.change(screen.getByLabelText("Trait name"), {
     target: { value: "Curiosity" },
   });
@@ -597,12 +627,14 @@ it("shows compact origin and modification states in both trait lists", async () 
     screen.getByRole("dialog", { name: "Edit Custom behavior" }),
   ).toBeTruthy();
   expect(screen.getByText("Created in this app profile.")).toBeTruthy();
-  await user.click(screen.getByRole("button", { name: "Cancel" }));
-
-  await user.click(screen.getByRole("button", { name: "Add trait" }));
+  await user.click(screen.getByRole("button", { name: "Save trait" }));
   availableMenu = await screen.findByRole("dialog", {
     name: "Available traits",
   });
+  expect(
+    within(availableMenu).getByRole("button", { name: "Custom behavior" }),
+  ).toHaveFocus();
+
   await user.click(
     within(availableMenu).getByRole("button", {
       name: "Unavailable behavior",
@@ -614,6 +646,15 @@ it("shows compact origin and modification states in both trait lists", async () 
     ),
   ).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "Cancel" }));
+  availableMenu = await screen.findByRole("dialog", {
+    name: "Available traits",
+  });
+  expect(
+    within(availableMenu).getByRole("button", {
+      name: "Unavailable behavior",
+    }),
+  ).toHaveFocus();
+  await user.keyboard("{Escape}");
 
   await user.click(screen.getByRole("button", { name: "Plugin behavior" }));
   expect(screen.getByText("Modified Plugin trait")).toBeTruthy();

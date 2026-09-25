@@ -57,9 +57,6 @@
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
-.base-prompt-add-trait {
-  flex: none;
-}
 .base-prompt-stack {
   display: flex;
   min-width: 0;
@@ -131,6 +128,43 @@
   gap: var(--space-2);
   list-style: none;
   padding: 0;
+}
+.base-prompt-add-row {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+}
+.base-prompt-board > li {
+  transition: opacity var(--duration-state) var(--easing-state);
+}
+.base-prompt-board[data-has-selection] > li:not([data-selected]) {
+  opacity: 0.35;
+}
+.base-prompt-add-trait {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-row);
+  background: var(--affordance-subtle);
+  color: var(--text-standard);
+  cursor: pointer;
+}
+.base-prompt-add-trait:hover {
+  background: var(--affordance-subtle-hover);
+  color: var(--text-primary);
+}
+html[data-keyboard-navigation] .base-prompt-add-trait:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .base-prompt-board > li {
+    transition: none;
+  }
 }
 .base-prompt-trait {
   position: relative;
@@ -263,6 +297,33 @@
   background: var(--surface-base);
   padding: var(--space-3);
 }
+.base-prompt-editor {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.base-prompt-editor-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.base-prompt-editor-fields {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.base-prompt-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  border-top: 1px solid var(--border-standard);
+  padding-top: var(--space-4);
+}
 .base-prompt-trait-actions {
   display: flex;
   flex: none;
@@ -284,9 +345,6 @@
 @media (max-width: 520px) {
   .base-prompt-metrics {
     flex-basis: 100%;
-  }
-  .base-prompt-add-trait {
-    margin-left: auto;
   }
   .base-prompt-available-trait {
     align-items: stretch;
