@@ -641,6 +641,7 @@ fn spawned_listener_receives_exact_app_base_until_confirmed_teardown() {
             &a.id,
             1,
             AgentEdit {
+                picture: None,
                 name: a.name.clone(),
                 system_prompt: "saved agent instructions".into(),
                 workspace: a.workspace.clone(),
