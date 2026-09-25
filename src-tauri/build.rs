@@ -34,6 +34,7 @@ fn main() {
             "agent_control_log_challenge",
             "agent_control_read_log",
             "agent_control_save",
+            "agent_control_adopt_instructions",
             "agent_control_start_on_app_launch",
             "agent_control_delete",
             "agent_control_action",

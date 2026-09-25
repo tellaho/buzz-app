@@ -91,25 +91,25 @@ export function AgentsPage({
       {control ? (
         <AgentControlPanel
           control={control}
-                editTarget={editTarget}
-                {...(editTarget && request && connection.status === "ready"
-                  ? { editRequest: request }
-                  : {})}
-                onCloseTarget={() => {
-                  if (target?.kind === "page" && open)
-                    void open(
-                      {
-                        version: 1,
-                        kind: "page",
-                        pluginId: target.pluginId,
-                        pageId: target.pageId,
-                        ...(target.scope !== undefined
-                          ? { scope: target.scope }
-                          : {}),
-                      },
-                      { replace: true },
-                    );
-                }}
+          editTarget={editTarget}
+          {...(editTarget && request && connection.status === "ready"
+            ? { editRequest: request }
+            : {})}
+          onCloseTarget={() => {
+            if (target?.kind === "page" && open)
+              void open(
+                {
+                  version: 1,
+                  kind: "page",
+                  pluginId: target.pluginId,
+                  pageId: target.pageId,
+                  ...(target.scope !== undefined
+                    ? { scope: target.scope }
+                    : {}),
+                },
+                { replace: true },
+              );
+          }}
           resolveName={resolveName}
           instructions={instructions}
           importDestination={importDestination}

@@ -21,6 +21,7 @@
     "allow-agent-control-log-challenge",
     "allow-agent-control-read-log",
     "allow-agent-control-save",
+    "allow-agent-control-adopt-instructions",
     "allow-agent-control-start-on-app-launch",
     "allow-agent-control-delete",
     "allow-agent-control-action",

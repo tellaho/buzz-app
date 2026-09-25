@@ -261,7 +261,7 @@ impl Drop for Store {
     }
 }
 fn validate(doc: &Document) -> Result<()> {
-    if !matches!(doc.version, 1 | 2 | 3) || doc.agents.len() > MAX_AGENTS {
+    if !matches!(doc.version, 1..=3) || doc.agents.len() > MAX_AGENTS {
         return Err("Unsupported agent storage version or size; left unchanged".into());
     }
     if matches!(doc.version, 2 | 3) && doc.instructions.is_none() {

@@ -20,6 +20,7 @@ test("Cargo rebuilds the real controller's nonsecret defaults from local config 
     "build.rs",
     "build_config.rs",
     "src",
+    "instructions",
     "tests",
   ])
     cpSync(

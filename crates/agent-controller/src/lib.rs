@@ -29,11 +29,11 @@ pub use create::{CreationProfile, NewAgent};
 pub use credentials::PlatformCredentials;
 pub use defaults::{build_defaults, BuildDefaults};
 pub use import::{CredentialedImport, ImportPreview, Imports, LegacySource, PreparedImport};
-pub use restart::{RestartChange, RestartDiffEntry};
 pub use instruction_composition::{
     InstructionCategory, InstructionComposition, InstructionDraft, InstructionIdentity,
     InstructionModule, InstructionPlugin, SavedInstructions, LOCAL_INSTRUCTIONS_PLUGIN,
 };
+pub use restart::{RestartChange, RestartDiffEntry};
 pub use runtime::{installed, Action, Controller, GooseModelContext, ModelContext};
 pub use secret::{Credentials, Secret};
 pub use store::Store;
