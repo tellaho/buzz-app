@@ -9,7 +9,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type {
   AgentInstructions,
@@ -92,7 +92,7 @@ const saved: SavedInstructions = {
   inactiveModules: [],
 };
 
-async function renderBuilder() {
+async function renderBuilder({ withLeave = false } = {}) {
   const fixture = controlFixture();
   const adoptInstructions = vi.fn(
     async (_revision: number, draft: InstructionDraft) => ({
@@ -119,8 +119,34 @@ async function renderBuilder() {
   };
   function Harness() {
     const state = useSyncExternalStore(control.subscribe, control.snapshot);
+    const [left, setLeft] = useState(false);
     return (
-      <BaseInstructions instructions={source} control={control} state={state} />
+      <BaseInstructions
+        instructions={source}
+        control={control}
+        state={state}
+        {...(withLeave
+          ? {
+              renderMain: (
+                content: ReactNode,
+                requestLeave: (leave: () => void) => void,
+              ) =>
+                left ? (
+                  <p>Agents view</p>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => requestLeave(() => setLeft(true))}
+                    >
+                      Leave base prompt
+                    </button>
+                    {content}
+                  </>
+                ),
+            }
+          : {})}
+      />
     );
   }
   const view = render(<Harness />);
@@ -142,11 +168,7 @@ it("shares one editable draft between Sections and All entries", async () => {
   ).toBeNull();
   expect(screen.queryByRole("button", { name: "Add trait" })).toBeNull();
   expect(screen.getByLabelText("Category heading for Core")).toBeVisible();
-  expect(
-    screen
-      .getByRole("button", { name: "Plugin behavior" })
-      .closest("[data-trait-key]"),
-  ).toHaveStyle({ gridColumn: "span 1", gridRow: "span 2" });
+  expect(screen.getByRole("button", { name: "Plugin behavior" })).toBeVisible();
   expect(
     screen.queryByRole("list", {
       name: "Approximate prompt cost by category",
@@ -154,17 +176,17 @@ it("shares one editable draft between Sections and All entries", async () => {
   ).toBeNull();
 
   await user.click(screen.getByRole("button", { name: "Custom behavior" }));
+  const pane = screen.getByRole("complementary", { name: "Trait" });
+  await user.click(within(pane).getByLabelText("Instructions"));
   fireEvent.change(screen.getByLabelText("Instructions"), {
     target: { value: "Edited custom instructions." },
   });
   await user.click(screen.getByRole("tab", { name: "All entries" }));
-  expect(
-    screen.getByRole("dialog", { name: "Edit Custom behavior" }),
-  ).toBeVisible();
-  expect(screen.getByLabelText("Instructions")).toHaveValue(
+  expect(pane).toBeVisible();
+  expect(within(pane).getByLabelText("Instructions")).toHaveValue(
     "Edited custom instructions.",
   );
-  await user.click(screen.getByRole("button", { name: "Save trait" }));
+  await user.click(within(pane).getByRole("button", { name: "Save trait" }));
 
   expect(screen.queryByLabelText("Category heading for Core")).toBeNull();
   expect(
@@ -172,13 +194,16 @@ it("shares one editable draft between Sections and All entries", async () => {
       name: "Approximate prompt cost by category",
     }),
   ).toBeVisible();
-  expect(screen.getByRole("button", { name: "Plugin behavior" })).toBeVisible();
   expect(
     screen
       .getByRole("button", { name: "Plugin behavior" })
       .closest("[data-trait-key]"),
   ).toHaveStyle({ gridColumn: "span 2", gridRow: "span 2" });
-  expect(screen.getByRole("button", { name: "Custom behavior" })).toBeVisible();
+  expect(
+    within(
+      screen.getByRole("region", { name: "Base prompt traits" }),
+    ).getByRole("button", { name: "Custom behavior" }),
+  ).toBeVisible();
   expect(screen.getByRole("button", { name: "Add trait" })).toBeVisible();
 
   await user.click(screen.getByRole("button", { name: "Apply base prompt" }));
@@ -245,10 +270,15 @@ it("edits category headings and tones while omitting empty categories from All e
     await screen.findByRole("menuitem", { name: "Add trait" }),
   ).toBeVisible();
   await user.click(screen.getByRole("menuitem", { name: "Add trait" }));
-  const createTrait = screen.getByRole("dialog", { name: "Create trait" });
+  const createTrait = screen.getByRole("complementary", { name: "Trait" });
   expect(createTrait).toBeVisible();
-  await user.click(within(createTrait).getByRole("button", { name: "Close" }));
+  expect(within(createTrait).getByLabelText("Trait name")).toHaveFocus();
+  await user.click(within(createTrait).getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(createTrait).not.toBeInTheDocument());
+  expect(
+    screen.getByRole("dialog", { name: "Available traits" }),
+  ).toBeVisible();
+  await user.keyboard("{Escape}");
   await user.click(screen.getByRole("button", { name: "Add to Principles" }));
   await user.click(
     await screen.findByRole("menuitem", { name: "Add category" }),
@@ -328,10 +358,11 @@ it("edits bundled defaults, keeps plugin entries read-only and validates bodies"
   const { adoptInstructions, control, user } = await renderBuilder();
 
   await user.click(screen.getByRole("button", { name: "Plugin behavior" }));
-  expect(screen.getByLabelText("Trait name")).toBeDisabled();
-  expect(screen.getByLabelText("Instructions")).toBeDisabled();
-  expect(screen.queryByRole("button", { name: "Save trait" })).toBeNull();
-  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  let pane = screen.getByRole("complementary", { name: "Trait" });
+  expect(within(pane).queryByLabelText("Trait name")).toBeNull();
+  expect(within(pane).getByRole("document")).toBeVisible();
+  expect(within(pane).queryByRole("button", { name: "Save trait" })).toBeNull();
+  await user.click(within(pane).getByRole("button", { name: "Close trait" }));
 
   await user.click(
     screen.getByRole("button", { name: "Actions for Plugin behavior" }),
@@ -341,30 +372,61 @@ it("edits bundled defaults, keeps plugin entries read-only and validates bodies"
   await user.keyboard("{Escape}");
 
   await user.click(screen.getByRole("button", { name: "Default behavior" }));
-  expect(screen.getByLabelText("Trait name")).toBeEnabled();
-  expect(screen.getByLabelText("Instructions")).toBeEnabled();
-  fireEvent.change(screen.getByLabelText("Instructions"), {
+  pane = screen.getByRole("complementary", { name: "Trait" });
+  await user.click(within(pane).getByLabelText("Instructions"));
+  expect(within(pane).getByLabelText("Trait name")).toBeEnabled();
+  expect(within(pane).getByLabelText("Instructions")).toBeEnabled();
+  fireEvent.change(within(pane).getByLabelText("Instructions"), {
     target: { value: "Edited default instructions." },
   });
   expect(
-    screen.getByRole("button", { name: "Reset to default" }),
+    within(pane).getByRole("button", { name: "Reset to default" }),
   ).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Save trait" }));
+  await user.click(
+    within(pane).getByRole("button", { name: "Reset to default" }),
+  );
+  expect(within(pane).getByLabelText("Instructions")).toHaveValue(
+    "Default instructions.",
+  );
+  expect(
+    within(pane).getByRole("button", { name: "Save trait" }),
+  ).toBeDisabled();
+  fireEvent.change(within(pane).getByLabelText("Instructions"), {
+    target: { value: "Edited default instructions." },
+  });
+  await user.click(within(pane).getByRole("button", { name: "Save trait" }));
+  await user.click(within(pane).getByLabelText("Instructions"));
+  await user.click(
+    within(pane).getByRole("button", { name: "Reset to default" }),
+  );
+  expect(within(pane).getByLabelText("Instructions")).toHaveValue(
+    "Default instructions.",
+  );
+  expect(
+    within(pane).getByRole("button", { name: "Save trait" }),
+  ).toBeEnabled();
+  await user.click(within(pane).getByRole("button", { name: "Cancel" }));
+  expect(within(pane).getByText("Edited default instructions.")).toBeVisible();
 
-  await user.click(screen.getByRole("button", { name: "Custom behavior" }));
-  fireEvent.change(screen.getByLabelText("Instructions"), {
+  await user.click(
+    within(
+      screen.getByRole("region", { name: "Base prompt traits" }),
+    ).getByRole("button", { name: "Custom behavior" }),
+  );
+  pane = screen.getByRole("complementary", { name: "Trait" });
+  await user.click(within(pane).getByLabelText("Instructions"));
+  fireEvent.change(within(pane).getByLabelText("Instructions"), {
     target: { value: "## User-supplied heading" },
   });
-  await user.click(screen.getByRole("button", { name: "Save trait" }));
+  await user.click(within(pane).getByRole("button", { name: "Save trait" }));
   expect(screen.getByText(/Invalid entry/)).toBeVisible();
 
-  fireEvent.change(screen.getByLabelText("Instructions"), {
+  fireEvent.change(within(pane).getByLabelText("Instructions"), {
     target: { value: "```md\n## Example heading\n```" },
   });
-  await user.click(screen.getByRole("button", { name: "Save trait" }));
-  expect(
-    screen.queryByRole("dialog", { name: "Edit Custom behavior" }),
-  ).toBeNull();
+  await user.click(within(pane).getByRole("button", { name: "Save trait" }));
+  expect(within(pane).queryByLabelText("Trait name")).toBeNull();
+  expect(within(pane).getByText("## Example heading")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Apply base prompt" }));
   await waitFor(() => expect(adoptInstructions).toHaveBeenCalledOnce());
   expect(
@@ -375,6 +437,189 @@ it("edits bundled defaults, keeps plugin entries read-only and validates bodies"
       text: "Edited default instructions.",
     }),
   );
+  control.dispose();
+});
+
+it("renders a sibling trait pane and restores focus without remounting the board", async () => {
+  const { control, user, view } = await renderBuilder();
+  const builder = screen.getByRole("region", { name: "Base prompt builder" });
+  const category = screen.getByLabelText("Category heading for Custom");
+  fireEvent.change(category, { target: { value: "Personal" } });
+  const trigger = within(builder).getByRole("button", {
+    name: "Custom behavior",
+  });
+
+  await user.click(trigger);
+  const pane = screen.getByRole("complementary", { name: "Trait" });
+  const frame = builder.parentElement?.parentElement;
+  expect(screen.queryByRole("dialog", { name: /Custom behavior/ })).toBeNull();
+  expect(frame).toBe(view.container.firstElementChild);
+  expect(frame?.children).toHaveLength(2);
+  expect(builder.parentElement).not.toBe(pane.parentElement);
+  expect(screen.getByLabelText("Category heading for Personal")).toBeVisible();
+
+  await user.click(trigger);
+  await waitFor(() => expect(trigger).toHaveFocus());
+  expect(screen.queryByRole("complementary", { name: "Trait" })).toBeNull();
+
+  await user.click(trigger);
+  const reopenedPane = screen.getByRole("complementary", { name: "Trait" });
+  await user.click(
+    within(reopenedPane).getByRole("button", { name: "Close trait" }),
+  );
+  await waitFor(() => expect(trigger).toHaveFocus());
+  expect(screen.queryByRole("complementary", { name: "Trait" })).toBeNull();
+  expect(screen.getByLabelText("Category heading for Personal")).toBeVisible();
+  control.dispose();
+});
+
+it("uses one Save action for title-only, body-only, and combined edits", async () => {
+  const { control, user } = await renderBuilder();
+  const board = screen.getByRole("region", { name: "Base prompt traits" });
+  await user.click(
+    within(board).getByRole("button", { name: "Custom behavior" }),
+  );
+  let pane = screen.getByRole("complementary", { name: "Trait" });
+
+  await user.click(
+    within(pane).getByRole("button", { name: "Custom behavior" }),
+  );
+  expect(
+    within(pane).getAllByRole("button", { name: "Save trait" }),
+  ).toHaveLength(1);
+  expect(
+    within(pane).getByRole("button", { name: "Save trait" }),
+  ).toBeDisabled();
+  fireEvent.change(within(pane).getByLabelText("Trait name"), {
+    target: { value: "Personal behavior" },
+  });
+  expect(
+    within(pane).getByRole("button", { name: "Save trait" }),
+  ).toBeEnabled();
+  await user.click(within(pane).getByRole("button", { name: "Save trait" }));
+  expect(
+    within(board).getByRole("button", { name: "Personal behavior" }),
+  ).toBeVisible();
+  expect(within(pane).getByText("Custom instructions.")).toBeVisible();
+
+  await user.click(within(pane).getByLabelText("Instructions"));
+  fireEvent.change(within(pane).getByLabelText("Instructions"), {
+    target: { value: "**Bold guidance.**\n\n<script>alert('no')</script>" },
+  });
+  await user.click(within(pane).getByRole("button", { name: "Save trait" }));
+  expect(within(pane).getByText("Bold guidance.").tagName).toBe("STRONG");
+  expect(pane.querySelector("script")).toBeNull();
+
+  await user.click(
+    within(pane).getByRole("button", { name: "Personal behavior" }),
+  );
+  fireEvent.change(within(pane).getByLabelText("Trait name"), {
+    target: { value: "Canceled title" },
+  });
+  fireEvent.change(within(pane).getByLabelText("Instructions"), {
+    target: { value: "Canceled body." },
+  });
+  await user.click(within(pane).getByRole("button", { name: "Cancel" }));
+  expect(
+    within(pane).getByRole("heading", { name: "Personal behavior" }),
+  ).toBeVisible();
+  expect(within(pane).getByText("Bold guidance.")).toBeVisible();
+
+  await user.click(
+    within(pane).getByRole("button", { name: "Personal behavior" }),
+  );
+  fireEvent.change(within(pane).getByLabelText("Trait name"), {
+    target: { value: "Combined behavior" },
+  });
+  fireEvent.change(within(pane).getByLabelText("Instructions"), {
+    target: { value: "Combined body." },
+  });
+  await user.click(within(pane).getByRole("button", { name: "Save trait" }));
+  pane = screen.getByRole("complementary", { name: "Trait" });
+  expect(
+    within(pane).getByRole("heading", { name: "Combined behavior" }),
+  ).toBeVisible();
+  expect(within(pane).getByText("Combined body.")).toBeVisible();
+  expect(
+    within(board).getByRole("button", { name: "Combined behavior" }),
+  ).toBeVisible();
+  control.dispose();
+});
+
+it("guards dirty close, retarget, and Base prompt leave with one discard flow", async () => {
+  const { control, user } = await renderBuilder({ withLeave: true });
+  const board = screen.getByRole("region", { name: "Base prompt traits" });
+  await user.click(
+    within(board).getByRole("button", { name: "Custom behavior" }),
+  );
+  let pane = screen.getByRole("complementary", { name: "Trait" });
+  await user.click(within(pane).getByLabelText("Instructions"));
+  fireEvent.change(within(pane).getByLabelText("Instructions"), {
+    target: { value: "Unsaved body." },
+  });
+
+  await user.keyboard("{Escape}");
+  let confirmation = screen.getByRole("alertdialog");
+  expect(confirmation).toHaveTextContent("Discard changes to Custom behavior?");
+  await user.click(
+    within(confirmation).getByRole("button", { name: "Keep editing" }),
+  );
+  expect(within(pane).getByLabelText("Instructions")).toHaveValue(
+    "Unsaved body.",
+  );
+
+  await user.click(
+    within(board).getByRole("button", { name: "Default behavior" }),
+  );
+  confirmation = screen.getByRole("alertdialog");
+  await user.click(
+    within(confirmation).getByRole("button", { name: "Keep editing" }),
+  );
+  expect(within(pane).getByLabelText("Instructions")).toHaveValue(
+    "Unsaved body.",
+  );
+  await user.click(
+    within(board).getByRole("button", { name: "Default behavior" }),
+  );
+  await user.click(
+    within(screen.getByRole("alertdialog")).getByRole("button", {
+      name: "Discard changes",
+    }),
+  );
+  pane = screen.getByRole("complementary", { name: "Trait" });
+  expect(within(pane).getByText("Default instructions.")).toBeVisible();
+
+  await user.click(within(pane).getByLabelText("Instructions"));
+  fireEvent.change(within(pane).getByLabelText("Instructions"), {
+    target: { value: "Another unsaved body." },
+  });
+  await user.click(screen.getByRole("button", { name: "Leave base prompt" }));
+  expect(screen.queryByText("Agents view")).toBeNull();
+  await user.click(
+    within(screen.getByRole("alertdialog")).getByRole("button", {
+      name: "Discard changes",
+    }),
+  );
+  expect(screen.getByText("Agents view")).toBeVisible();
+  control.dispose();
+});
+
+it("cancels a new trait back to Available traits", async () => {
+  const { control, user } = await renderBuilder();
+  await user.click(screen.getByRole("tab", { name: "All entries" }));
+  await user.click(screen.getByRole("button", { name: "Add trait" }));
+  const library = screen.getByRole("dialog", { name: "Available traits" });
+  await user.click(within(library).getByRole("button", { name: "New trait" }));
+  const pane = screen.getByRole("complementary", { name: "Trait" });
+  expect(within(pane).getByLabelText("Trait name")).toHaveFocus();
+  fireEvent.change(within(pane).getByLabelText("Trait name"), {
+    target: { value: "Abandoned trait" },
+  });
+  await user.click(within(pane).getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("complementary", { name: "Trait" })).toBeNull();
+  expect(
+    screen.getByRole("dialog", { name: "Available traits" }),
+  ).toBeVisible();
   control.dispose();
 });
 

@@ -19,6 +19,7 @@ import { AgentEditor } from "./AgentEditor";
 import { AgentImport } from "./AgentImport";
 import { AgentCreateDialog } from "./AgentCreateDialog";
 import { AgentDeleteDialog } from "./AgentDeleteDialog";
+import { FullPageSurface } from "../../shared/design-system/ui/FullPageSurface";
 import "./AgentControls.css";
 
 /** No relay dependency. Page lifetime owns observation only, never native execution. */
@@ -128,35 +129,8 @@ export function AgentControlPanel({
     }
   }, [editRequest, editing, state.status]);
   const deletion = state.data?.agents.find((agent) => agent.id === deleting);
-  return (
-    <section
-      data-buzz-ui=""
-      aria-label="Local agent controls"
-      className="agent-controls flex min-w-0 flex-col gap-section-gap text-body text-primary"
-    >
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex min-w-0 flex-col gap-2">
-          <h1 className="m-0 text-title">Agents</h1>
-          <p className="m-0 text-body-sm text-secondary">
-            Manage your agents and bring them into a conversation.
-          </p>
-        </div>
-        {state.data && view === "agents" && (
-          <Button
-            variant="primary"
-            aria-haspopup="dialog"
-            onClick={() =>
-              setAdding({
-                destination: importDestination,
-                owner: createOwner ?? "",
-              })
-            }
-          >
-            <PlusIcon size={16} aria-hidden="true" />
-            Add agent
-          </Button>
-        )}
-      </header>
+  const status = (
+    <>
       {(state.status === "idle" || state.status === "loading") && (
         <p role="status">Reading local agent status…</p>
       )}
@@ -176,74 +150,124 @@ export function AgentControlPanel({
         <Button onClick={() => void control.refresh()}>Retry status</Button>
       )}
       {state.busy && <p role="status">Waiting for the host to confirm…</p>}
-      {instructions && (
-        <Tabs
-          variant="panel"
-          label="Agent settings"
-          value={view}
-          onValueChange={setView}
+    </>
+  );
+  const renderSurface = (
+    content: ReactNode,
+    onViewChange: (next: "agents" | "base-prompt") => void = setView,
+  ) => (
+    <FullPageSurface aria-label="Agents">
+      <div className="h-full min-h-0 overflow-auto p-panel-inset text-body">
+        <section
+          data-buzz-ui=""
+          aria-label="Local agent controls"
+          className="agent-controls mx-auto flex max-w-6xl min-w-0 flex-col gap-section-gap text-body text-primary"
+        >
+          <header className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex min-w-0 flex-col gap-2">
+              <h1 className="m-0 text-title">Agents</h1>
+              <p className="m-0 text-body-sm text-secondary">
+                Manage your agents and bring them into a conversation.
+              </p>
+            </div>
+            {state.data && view === "agents" && (
+              <Button
+                variant="primary"
+                aria-haspopup="dialog"
+                onClick={() =>
+                  setAdding({
+                    destination: importDestination,
+                    owner: createOwner ?? "",
+                  })
+                }
+              >
+                <PlusIcon size={16} aria-hidden="true" />
+                Add agent
+              </Button>
+            )}
+          </header>
+          {instructions && (
+            <Tabs
+              variant="panel"
+              label="Agent settings"
+              value={view}
+              onValueChange={onViewChange}
+              items={[
+                { value: "agents", label: "Agents" },
+                { value: "base-prompt", label: "Base prompt" },
+              ]}
+            />
+          )}
+          {status}
+          {content}
+        </section>
+      </div>
+    </FullPageSurface>
+  );
+  const agents = (
+    <>
+      {children ? (
+        children(state, edit, duplicate, remove, importedId, label)
+      ) : (
+        <div className="agent-grid">
+          {state.data?.agents.map((agent) => (
+            <AgentCard
+              key={agent.id}
+              name={label(agent)}
+              identities={[agent]}
+              editable={[agent]}
+              onEdit={edit}
+              onDuplicate={duplicate}
+              onDelete={control.delete ? remove : undefined}
+            />
+          ))}
+        </div>
+      )}
+      {state.data && (
+        <Accordion
+          variant="activity"
+          value={importSections}
+          onValueChange={setImportSections}
           items={[
-            { value: "agents", label: "Agents" },
-            { value: "base-prompt", label: "Base prompt" },
+            {
+              value: "old-buzz",
+              title: "Not imported from old Buzz",
+              content: importSections.includes("old-buzz") ? (
+                <AgentImport
+                  key={importDestination}
+                  control={control}
+                  initialDestination={importDestination}
+                  managedAgents={state.data.agents}
+                  commitAvailable={
+                    state.status === "ready" &&
+                    state.data.importAvailable !== false
+                  }
+                  disabled={state.busy}
+                  onImported={(agents) => {
+                    setImportedId(agents[0]?.id ?? null);
+                    setImportSections([]);
+                  }}
+                />
+              ) : null,
+            },
           ]}
         />
       )}
+    </>
+  );
+  return (
+    <div className="h-full min-h-0">
       {view === "base-prompt" && instructions ? (
         <BaseInstructions
           instructions={instructions}
           control={control}
           state={state}
+          renderMain={(content, requestLeave) =>
+            renderSurface(content, (next) => requestLeave(() => setView(next)))
+          }
         />
       ) : (
-        <>
-          {children ? (
-            children(state, edit, duplicate, remove, importedId, label)
-          ) : (
-            <div className="agent-grid">
-              {state.data?.agents.map((agent) => (
-                <AgentCard
-                  key={agent.id}
-                  name={label(agent)}
-                  identities={[agent]}
-                  editable={[agent]}
-                  onEdit={edit}
-                  onDuplicate={duplicate}
-                  onDelete={control.delete ? remove : undefined}
-                />
-              ))}
-            </div>
-          )}
-          {state.data && (
-            <Accordion
-              variant="activity"
-              value={importSections}
-              onValueChange={setImportSections}
-              items={[
-                {
-                  value: "old-buzz",
-                  title: "Not imported from old Buzz",
-                  content: importSections.includes("old-buzz") ? (
-                    <AgentImport
-                      key={importDestination}
-                      control={control}
-                      initialDestination={importDestination}
-                      managedAgents={state.data.agents}
-                      commitAvailable={
-                        state.status === "ready" &&
-                        state.data.importAvailable !== false
-                      }
-                      disabled={state.busy}
-                      onImported={(agents) => {
-                        setImportedId(agents[0]?.id ?? null);
-                        setImportSections([]);
-                      }}
-                    />
-                  ) : null,
-                },
-              ]}
-            />
-          )}
-        </>
+        renderSurface(agents)
       )}
       {adding && (
         <AgentCreateDialog
@@ -276,6 +300,6 @@ export function AgentControlPanel({
           onClose={() => setDeleting(null)}
         />
       )}
-    </section>
+    </div>
   );
 }

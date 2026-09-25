@@ -106,40 +106,49 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
       page.getByRole("menuitem", { name: "Add category" }),
     ).toBeVisible();
     await page.getByRole("menuitem", { name: "Add trait" }).click();
-    const createTrait = page.getByRole("dialog", { name: "Create trait" });
+    const createTrait = page.getByRole("complementary", { name: "Trait" });
     await expect(createTrait).toBeVisible();
-    await createTrait.getByRole("button", { name: "Close" }).click();
+    await expect(createTrait.getByLabel("Trait name")).toBeFocused();
+    await createTrait.getByRole("button", { name: "Close trait" }).click();
     const largeCard = active
       .getByRole("button", { name: "Buzz identity", exact: true })
       .locator("xpath=ancestor::li");
-    await expect(largeCard).toHaveCSS("grid-column-start", "span 1");
-    await expect(largeCard).toHaveCSS("grid-row-start", "span 2");
-    const [sectionCardBox, sectionHeadingBox] = await Promise.all([
-      largeCard.boundingBox(),
-      active
-        .getByLabel("Category heading for Core", { exact: true })
-        .locator("xpath=ancestor::li")
-        .boundingBox(),
-    ]);
+    const board = active.getByRole("list", {
+      name: "Prompt traits in sequence",
+    });
+    const [sectionCardBox, sectionHeadingBox, sectionBoardBox] =
+      await Promise.all([
+        largeCard.boundingBox(),
+        active
+          .getByLabel("Category heading for Core", { exact: true })
+          .locator("xpath=ancestor::li")
+          .boundingBox(),
+        board.boundingBox(),
+      ]);
+    expect(
+      Math.abs(sectionCardBox.width / sectionCardBox.height - 4 / 3),
+    ).toBeLessThan(0.02);
+    expect(
+      Math.abs(sectionHeadingBox.width - sectionBoardBox.width),
+    ).toBeLessThan(2);
     expect(sectionHeadingBox.height).toBeLessThan(sectionCardBox.height * 0.6);
     const emptyCategoryBox = await active
       .getByLabel("Capabilities is empty", { exact: true })
       .boundingBox();
-    expect(emptyCategoryBox.width).toBeGreaterThan(sectionCardBox.width * 0.9);
-    expect(emptyCategoryBox.height).toBeGreaterThan(
-      sectionHeadingBox.height * 1.5,
-    );
+    expect(
+      Math.abs(emptyCategoryBox.width - sectionCardBox.width),
+    ).toBeLessThan(2);
+    expect(
+      Math.abs(emptyCategoryBox.height - sectionCardBox.height),
+    ).toBeLessThan(2);
     await builder.getByRole("tab", { name: "All entries" }).click();
     await expect(
       active.getByLabel("Category heading for Core", { exact: true }),
     ).toHaveCount(0);
     await expect(largeCard).toHaveCSS("grid-column-start", "span 2");
     await expect(largeCard).toHaveCSS("grid-row-start", "span 2");
-    // Browser-only: CSS grid geometry and Base UI's computed collision side are
-    // layout contracts that a DOM emulator cannot establish.
-    const board = active.getByRole("list", {
-      name: "Prompt traits in sequence",
-    });
+    // Browser-only: aspect-ratio, proportional grid placement, and responsive
+    // companion geometry are layout contracts that a DOM emulator cannot establish.
     const addTrait = active.getByRole("button", { name: "Add trait" });
     const [boardGeometry, addGeometry] = await Promise.all([
       board.evaluate((element) => {
@@ -193,46 +202,97 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
       boardGeometry.bottom - 1,
     );
 
-    const placements = await board
-      .locator("[data-trait-key]")
-      .evaluateAll((tiles) => {
-        const boardBounds = tiles[0].parentElement.getBoundingClientRect();
-        const middle = boardBounds.left + boardBounds.width / 2;
-        return tiles.map((tile) => {
-          const bounds = tile.getBoundingClientRect();
-          return {
-            title: tile
-              .querySelector(".base-prompt-trait-open")
-              .getAttribute("aria-label"),
-            side: bounds.left + bounds.width / 2 <= middle ? "right" : "left",
-          };
-        });
-      });
-    const leftHalf = placements.find(({ side }) => side === "right");
-    const rightHalf = placements.find(({ side }) => side === "left");
-    expect(leftHalf).toBeTruthy();
-    expect(rightHalf).toBeTruthy();
-    for (const placement of [leftHalf, rightHalf]) {
-      const trigger = active.getByRole("button", {
-        name: placement.title,
-        exact: true,
-      });
-      await trigger.click();
-      const traitEditor = page.getByRole("dialog", {
-        name: `Edit ${placement.title}`,
-      });
-      await expect(traitEditor).toHaveAttribute("data-side", placement.side);
-      await expect(trigger.locator("xpath=ancestor::li")).toHaveCSS(
-        "opacity",
-        "1",
-      );
-      await expect(
-        board.locator("[data-trait-key]:not([data-selected])").first(),
-      ).toHaveCSS("opacity", "0.35");
-      await traitEditor.getByRole("button", { name: "Cancel" }).click();
-      await expect(trigger).toBeFocused();
-      await expect(board.locator("li").first()).toHaveCSS("opacity", "1");
-    }
+    const originalViewport = page.viewportSize();
+    const trigger = active.getByRole("button", {
+      name: "Threading",
+      exact: true,
+    });
+    await trigger.click();
+    let traitPane = page.getByRole("complementary", { name: "Trait" });
+    await expect(traitPane).toBeVisible();
+    await expect(page.getByRole("dialog", { name: /Threading/ })).toHaveCount(
+      0,
+    );
+    const agentsSurface = page.getByRole("region", { name: "Agents" });
+    expect(
+      await traitPane.evaluate((aside) => {
+        const dock = aside.parentElement;
+        const frame = dock?.parentElement;
+        return (
+          frame?.children.length === 2 &&
+          frame.firstElementChild?.querySelector('[aria-label="Agents"]') !==
+            null
+        );
+      }),
+    ).toBe(true);
+    const [wideMain, widePane, frameGap] = await Promise.all([
+      agentsSurface.boundingBox(),
+      traitPane.boundingBox(),
+      traitPane.evaluate((aside) => {
+        const frame = aside.parentElement?.parentElement;
+        const probe = document.createElement("div");
+        probe.style.cssText =
+          "position:absolute;width:var(--space-panel-gap);pointer-events:none";
+        frame?.append(probe);
+        const expected = probe.getBoundingClientRect().width;
+        probe.remove();
+        return {
+          actual: frame ? Number.parseFloat(getComputedStyle(frame).gap) : 0,
+          expected,
+        };
+      }),
+    ]);
+    expect(frameGap.actual).toBe(frameGap.expected);
+    expect(
+      Math.abs(widePane.x - (wideMain.x + wideMain.width) - frameGap.expected),
+    ).toBeLessThan(1);
+    await traitPane.getByLabel("Instructions").click();
+    await traitPane
+      .getByRole("textbox", { name: "Instructions" })
+      .fill("Unsaved responsive check.");
+    await page.getByRole("tab", { name: "Agents", exact: true }).click();
+    const discard = page.getByRole("alertdialog");
+    await expect(discard).toContainText("Discard changes to Threading?");
+    await discard.getByRole("button", { name: "Keep editing" }).click();
+    await expect(
+      traitPane.getByRole("textbox", { name: "Instructions" }),
+    ).toHaveValue("Unsaved responsive check.");
+    await traitPane.getByRole("button", { name: "Cancel" }).click();
+    await trigger.click();
+    await expect(trigger).toBeFocused();
+    await expect(traitPane).toHaveCount(0);
+    await expect(
+      builder.getByRole("tab", { name: "All entries" }),
+    ).toHaveAttribute("aria-selected", "true");
+
+    await page.setViewportSize({ width: 900, height: 900 });
+    const overlayWidth = (await agentsSurface.boundingBox()).width;
+    await trigger.click();
+    traitPane = page.getByRole("complementary", { name: "Trait" });
+    const [overlayMain, overlayPane] = await Promise.all([
+      agentsSurface.boundingBox(),
+      traitPane.boundingBox(),
+    ]);
+    expect(Math.abs(overlayMain.width - overlayWidth)).toBeLessThan(2);
+    expect(overlayPane.width).toBeLessThanOrEqual(420);
+    expect(
+      Math.abs(
+        overlayPane.x + overlayPane.width - (overlayMain.x + overlayMain.width),
+      ),
+    ).toBeLessThan(2);
+    await traitPane.getByRole("button", { name: "Close trait" }).click();
+
+    await page.setViewportSize({ width: 390, height: 900 });
+    await trigger.click();
+    traitPane = page.getByRole("complementary", { name: "Trait" });
+    const mobileFrame = traitPane.locator("xpath=../..");
+    const [mobilePane, mobileFrameBox] = await Promise.all([
+      traitPane.boundingBox(),
+      mobileFrame.boundingBox(),
+    ]);
+    expect(Math.abs(mobilePane.width - mobileFrameBox.width)).toBeLessThan(2);
+    await traitPane.getByRole("button", { name: "Close trait" }).click();
+    await page.setViewportSize(originalViewport);
 
     await active.getByRole("button", { name: "Add trait" }).click();
     const available = page.getByRole("dialog", { name: "Available traits" });
@@ -280,7 +340,8 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
     await active
       .getByRole("button", { name: "Threading", exact: true })
       .click();
-    const defaultEditor = page.getByRole("dialog", { name: "Edit Threading" });
+    const defaultEditor = page.getByRole("complementary", { name: "Trait" });
+    await defaultEditor.getByLabel("Instructions").click();
     await defaultEditor
       .getByRole("textbox", { name: "Instructions" })
       .fill("Prefer shallow human threads.");
@@ -294,12 +355,16 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
       .getByRole("button", { name: "Add to Capabilities", exact: true })
       .click();
     await page.getByRole("menuitem", { name: "Add trait" }).click();
-    const create = page.getByRole("dialog", { name: "Create trait" });
+    const create = page.getByRole("complementary", { name: "Trait" });
     await create.getByRole("textbox", { name: "Trait name" }).fill("Curiosity");
     await create
       .getByRole("textbox", { name: "Instructions" })
       .fill("Ask one useful question before assuming intent.");
     await create.getByRole("button", { name: "Save trait" }).click();
+    await expect(
+      create.getByText("Ask one useful question before assuming intent."),
+    ).toBeVisible();
+    await create.getByRole("button", { name: "Close trait" }).click();
 
     const applyBasePrompt = builder.getByRole("button", {
       name: "Apply base prompt",
@@ -367,23 +432,28 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
       "data-color-mode",
       "dark",
     );
-    await expect
-      .poll(() =>
-        active
-          .getByRole("list", { name: "Prompt traits in sequence" })
-          .evaluate((board) =>
-            getComputedStyle(board)
-              .getPropertyValue("--base-prompt-board-columns")
-              .trim(),
-          ),
-      )
-      .toBe("3");
+    const mobileCardBox = await largeCard.boundingBox();
+    expect(Math.abs(mobileCardBox.width - sectionCardBox.width)).toBeLessThan(
+      2,
+    );
+    expect(Math.abs(mobileCardBox.height - sectionCardBox.height)).toBeLessThan(
+      2,
+    );
     const darkCategoryColors = await traitCategoryColors(builder);
     expect(
       new Set(Object.values(darkCategoryColors)).size,
     ).toBeGreaterThanOrEqual(3);
     expect(darkCategoryColors).not.toEqual(categoryColors);
     await builder.getByRole("tab", { name: "All entries" }).click();
+    await expect
+      .poll(() =>
+        board.evaluate((element) =>
+          getComputedStyle(element)
+            .getPropertyValue("--base-prompt-board-columns")
+            .trim(),
+        ),
+      )
+      .toBe("3");
     await active.getByRole("button", { name: "Add trait" }).click();
     const narrowAvailableBox = await page
       .getByRole("dialog", { name: "Available traits" })

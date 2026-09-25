@@ -88,15 +88,9 @@ export function AgentsPage({
     );
   return (
     <div className="h-full min-h-0">
-      <FullPageSurface aria-label="Agents">
-        <div className="h-full min-h-0 overflow-auto p-panel-inset text-body">
-          <div className="mx-auto flex max-w-6xl flex-col gap-panel-gap">
-            {!control && (
-              <h1 className="m-0 text-title text-primary">Agents</h1>
-            )}
-            {control ? (
-              <AgentControlPanel
-                control={control}
+      {control ? (
+        <AgentControlPanel
+          control={control}
                 editTarget={editTarget}
                 {...(editTarget && request && connection.status === "ready"
                   ? { editRequest: request }
@@ -116,43 +110,45 @@ export function AgentsPage({
                       { replace: true },
                     );
                 }}
-                resolveName={resolveName}
-                instructions={instructions}
-                importDestination={importDestination}
-                createOwner={
-                  connection.status === "ready" ? connection.viewer : undefined
-                }
-              >
-                {(state, edit, duplicate, remove, importedId, label) =>
-                  state.status === "unavailable" ? (
-                    library
-                  ) : (
-                    <ManagedAgents
-                      key={`${connection.scope}:${connection.generation}`}
-                      state={state}
-                      label={label}
-                      edit={edit}
-                      duplicate={duplicate}
-                      remove={remove}
-                      importedId={importedId}
-                      control={control}
-                      connection={connection}
-                    />
-                  )
-                }
-              </AgentControlPanel>
+          resolveName={resolveName}
+          instructions={instructions}
+          importDestination={importDestination}
+          createOwner={
+            connection.status === "ready" ? connection.viewer : undefined
+          }
+        >
+          {(state, edit, duplicate, remove, importedId, label) =>
+            state.status === "unavailable" ? (
+              library
             ) : (
-              <>
-                <p className="text-secondary">
-                  Open the desktop app to import and run agents. You can still
-                  mention existing channel members.
-                </p>
-                {library}
-              </>
-            )}
+              <ManagedAgents
+                key={`${connection.scope}:${connection.generation}`}
+                state={state}
+                label={label}
+                edit={edit}
+                duplicate={duplicate}
+                remove={remove}
+                importedId={importedId}
+                control={control}
+                connection={connection}
+              />
+            )
+          }
+        </AgentControlPanel>
+      ) : (
+        <FullPageSurface aria-label="Agents">
+          <div className="h-full min-h-0 overflow-auto p-panel-inset text-body">
+            <div className="mx-auto flex max-w-6xl flex-col gap-panel-gap">
+              <h1 className="m-0 text-title text-primary">Agents</h1>
+              <p className="text-secondary">
+                Open the desktop app to import and run agents. You can still
+                mention existing channel members.
+              </p>
+              {library}
+            </div>
           </div>
-        </div>
-      </FullPageSurface>
+        </FullPageSurface>
+      )}
     </div>
   );
 }

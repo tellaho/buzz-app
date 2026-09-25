@@ -29,7 +29,7 @@
   min-height: 0;
   position: relative;
   overflow: hidden;
-  gap: var(--space-4);
+  gap: var(--space-panel-gap);
 }
 .withCompanion {
   grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);

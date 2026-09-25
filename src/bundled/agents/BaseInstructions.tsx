@@ -1,13 +1,17 @@
 import {
   Fragment,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   type RefObject,
 } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type {
   AgentInstructions,
   InstructionCategory,
@@ -33,7 +37,6 @@ import {
 } from "../../shared/design-system/icons";
 import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
 import { Button } from "../../shared/design-system/ui/Button";
-import { Field } from "../../shared/design-system/ui/Field";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Input } from "../../shared/design-system/ui/Input";
 import {
@@ -44,7 +47,6 @@ import {
   MenuTrigger,
 } from "../../shared/design-system/ui/Menu";
 import {
-  PopoverClose,
   PopoverDescription,
   PopoverPopup,
   PopoverRoot,
@@ -53,7 +55,9 @@ import {
 } from "../../shared/design-system/ui/Popover";
 import { Textarea } from "../../shared/design-system/ui/Textarea";
 import { Tabs } from "../../shared/design-system/ui/Tabs";
-import { Select } from "../../shared/design-system/ui/Select";
+import { Panel } from "../../shared/design-system/ui/Panel";
+import { PanelHeader } from "../../shared/design-system/ui/PanelHeader";
+import { PanelFrame } from "../../features/panels/PanelFrame";
 import {
   availableInstructionModules,
   DEFAULT_INSTRUCTIONS_PLUGIN,
@@ -84,8 +88,8 @@ type Editor = {
   module: SavedModule;
   title: string;
   text: string;
-  dirty: boolean;
-  side: "left" | "right";
+  editing: boolean;
+  trigger: HTMLElement | null;
   returnFocus: string | undefined;
 };
 type Drag = {
@@ -107,18 +111,21 @@ type DropTarget = { index: number; category?: string };
 type BoardStyle = CSSProperties & {
   "--base-prompt-board-columns": number;
   "--base-prompt-board-cell": string;
-  "--base-prompt-section-row": string;
 };
-
 /** Global profile editor. Drafts remain local until one CAS-pinned adoption. */
 export function BaseInstructions({
   instructions,
   control,
   state,
+  renderMain,
 }: {
   instructions: AgentInstructions;
   control: AgentControl;
   state: AgentControlState;
+  renderMain?: (
+    content: ReactNode,
+    requestLeave: (leave: () => void) => void,
+  ) => ReactNode;
 }) {
   const proposal = useSyncExternalStore(
     instructions.subscribe,
@@ -126,13 +133,17 @@ export function BaseInstructions({
     instructions.snapshot,
   );
   const saved = state.data?.instructions;
-  if (!saved || !control.adoptInstructions) return null;
+  if (!saved || !control.adoptInstructions)
+    return renderMain ? (
+      <PanelFrame>{renderMain(null, (leave) => leave())}</PanelFrame>
+    ) : null;
   return (
     <BaseInstructionBuilder
       proposal={proposal}
       saved={saved}
       control={control}
       state={state}
+      {...(renderMain ? { renderMain } : {})}
     />
   );
 }
@@ -142,11 +153,16 @@ function BaseInstructionBuilder({
   saved,
   control,
   state,
+  renderMain,
 }: {
   proposal: ReturnType<AgentInstructions["snapshot"]>;
   saved: SavedInstructions;
   control: AgentControl;
   state: AgentControlState;
+  renderMain?: (
+    content: ReactNode,
+    requestLeave: (leave: () => void) => void,
+  ) => ReactNode;
 }) {
   const [draft, setDraft] = useState<MutableInstructionDraft>(() =>
     instructionDraft(saved),
@@ -154,6 +170,8 @@ function BaseInstructionBuilder({
   const [baseRevision, setBaseRevision] = useState(saved.revision);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
+  const [discarding, setDiscarding] = useState<(() => void) | null>(null);
+  const [focusEditorBody, setFocusEditorBody] = useState(false);
   const [deleting, setDeleting] = useState<SavedModule | null>(null);
   const [deletingCategory, setDeletingCategory] =
     useState<InstructionCategory | null>(null);
@@ -166,9 +184,9 @@ function BaseInstructionBuilder({
   const [viewMode, setViewMode] = useState<"sections" | "all">("sections");
   const board = useRef<HTMLOListElement>(null);
   const editorName = useRef<HTMLInputElement>(null);
+  const pendingEditorFocus = useRef<Editor | null>(null);
   const pendingMenuEdit = useRef<SavedModule | null>(null);
   const suppressMenuFocus = useRef<string | null>(null);
-  const switchingView = useRef(false);
   const traitTiles = useRef(new Map<string, HTMLLIElement>());
   const categoryAddAnchors = useRef(new Map<string, HTMLElement>());
   const libraryActions = useRef(new Map<string, HTMLElement>());
@@ -226,6 +244,10 @@ function BaseInstructionBuilder({
     (editor.title !== editorSource.title ||
       instructionEditorText(editor.text) !==
         instructionEditorText(editorSource.text));
+  const editorChanged =
+    editor !== null &&
+    (editor.title !== editor.module.title ||
+      editor.text !== instructionEditorText(editor.module.text));
 
   const mutate = (
     update: (current: MutableInstructionDraft) => MutableInstructionDraft,
@@ -261,40 +283,6 @@ function BaseInstructionBuilder({
         ],
       },
     }));
-  const addTrait = (category: string) => {
-    const id = globalThis.crypto.randomUUID();
-    setLibraryAnchor(categoryAddAnchors.current.get(category) ?? null);
-    setAvailableOpen(true);
-    edit(
-      {
-        key: `${LOCAL_INSTRUCTIONS_PLUGIN}/${id}`,
-        title: "New trait",
-        pluginId: LOCAL_INSTRUCTIONS_PLUGIN,
-        revision: LOCAL_INSTRUCTIONS_REVISION,
-        order: draft.composition.modules.length * 10,
-        category,
-        text: "",
-      },
-      "new",
-    );
-  };
-  const resetAllToDefaults = () => {
-    setDraft(
-      instructionDraft({
-        revision: saved.revision,
-        composition: proposal.composition,
-        inactiveModules: [],
-      }),
-    );
-    setBaseRevision(saved.revision);
-    setEditor(null);
-    setEditorError(null);
-    setAvailableOpen(false);
-    setOpenActions(null);
-    setDeleting(null);
-    setDeletingCategory(null);
-    setError(null);
-  };
   const moveCategory = (id: string, offset: -1 | 1) =>
     mutate((current) => {
       const categories = [...current.composition.categories];
@@ -309,39 +297,109 @@ function BaseInstructionBuilder({
         composition: { ...current.composition, categories },
       };
     });
-  const traitSide = (key: string) => {
-    const tile = traitTiles.current.get(key);
-    const list = board.current;
-    if (!tile || !list) return "right";
-    const tileBounds = tile.getBoundingClientRect();
-    const boardBounds = list.getBoundingClientRect();
-    return tileBounds.left + tileBounds.width / 2 <=
-      boardBounds.left + boardBounds.width / 2
-      ? "right"
-      : "left";
+  const requestTransition = (transition: () => void) => {
+    if (editorChanged) setDiscarding(() => transition);
+    else transition();
+  };
+  const openEditor = (
+    module: SavedModule,
+    location: Editor["location"],
+    returnFocus?: string,
+    explicitTrigger?: HTMLElement | null,
+  ) => {
+    const trigger =
+      explicitTrigger ??
+      (document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null);
+    setAvailableOpen(false);
+    setEditor({
+      location,
+      module,
+      title: module.title,
+      text: instructionEditorText(module.text),
+      editing: location === "new",
+      trigger,
+      returnFocus,
+    });
+    setFocusEditorBody(false);
+    setEditorError(null);
   };
   const edit = (
     module: SavedModule,
     location: Editor["location"],
     returnFocus?: string,
-  ) => {
-    setEditor({
-      location,
-      module,
-      title: module.title,
-      text: module.text,
-      dirty: false,
-      side: location === "active" ? traitSide(module.key) : "left",
-      returnFocus,
-    });
-    setEditorError(null);
+    trigger?: HTMLElement | null,
+  ) =>
+    requestTransition(() => openEditor(module, location, returnFocus, trigger));
+  const restoreEditorFocus = (closed: Editor) => {
+    pendingEditorFocus.current = closed;
   };
+  const closeEditor = () =>
+    requestTransition(() => {
+      if (!editor) return;
+      const closed = editor;
+      setEditor(null);
+      setEditorError(null);
+      restoreEditorFocus(closed);
+    });
   const returnToLibrary = () => {
     if (!editor) return;
     setLibraryFocus(editor.returnFocus ?? "new");
+    setAvailableOpen(true);
     setEditor(null);
     setEditorError(null);
   };
+  const cancelEditor = () => {
+    if (!editor) return;
+    if (editor.location === "new") {
+      returnToLibrary();
+      return;
+    }
+    setEditor({
+      ...editor,
+      title: editor.module.title,
+      text: instructionEditorText(editor.module.text),
+      editing: false,
+    });
+    setEditorError(null);
+  };
+  const addTrait = (category: string) => {
+    const id = globalThis.crypto.randomUUID();
+    setLibraryAnchor(categoryAddAnchors.current.get(category) ?? null);
+    edit(
+      {
+        key: `${LOCAL_INSTRUCTIONS_PLUGIN}/${id}`,
+        title: "New trait",
+        pluginId: LOCAL_INSTRUCTIONS_PLUGIN,
+        revision: LOCAL_INSTRUCTIONS_REVISION,
+        order: draft.composition.modules.length * 10,
+        category,
+        text: "",
+      },
+      "new",
+      undefined,
+      categoryAddAnchors.current.get(category) ?? null,
+    );
+  };
+  const resetAllToDefaults = () =>
+    requestTransition(() => {
+      setDraft(
+        instructionDraft({
+          revision: saved.revision,
+          composition: proposal.composition,
+          inactiveModules: [],
+        }),
+      );
+      setBaseRevision(saved.revision);
+      setEditor(null);
+      setEditorError(null);
+      setAvailableOpen(false);
+      setOpenActions(null);
+      setDeleting(null);
+      setDeletingCategory(null);
+      setError(null);
+    });
   const move = (from: number, to: number, category?: string) => {
     if (
       to < 0 ||
@@ -391,6 +449,27 @@ function BaseInstructionBuilder({
     libraryActions.current.get(libraryFocus)?.focus();
     setLibraryFocus(null);
   }, [availableOpen, editor, libraryFocus]);
+  useLayoutEffect(() => {
+    const closed = pendingEditorFocus.current;
+    if (editor || !closed) return;
+    pendingEditorFocus.current = null;
+    if (closed.trigger?.isConnected) {
+      closed.trigger.focus();
+      return;
+    }
+    if (closed.location === "active") {
+      traitTiles.current
+        .get(closed.module.key)
+        ?.querySelector<HTMLElement>(".base-prompt-trait-open")
+        ?.focus();
+      return;
+    }
+    if (libraryAnchor?.isConnected) {
+      libraryAnchor.focus();
+      return;
+    }
+    document.getElementById("base-prompt-add-trait")?.focus();
+  }, [editor, libraryAnchor]);
   const pointerDown = (
     event: ReactPointerEvent<HTMLLIElement>,
     key: string,
@@ -537,10 +616,7 @@ function BaseInstructionBuilder({
   };
   const saveEditor = () => {
     if (!editor) return;
-    if (!editableInstructionModule(editor.module)) {
-      setEditor(null);
-      return;
-    }
+    if (!editableInstructionModule(editor.module) || !editorChanged) return;
     if (!editor.title.trim()) {
       setEditorError("Give this trait a name.");
       return;
@@ -594,142 +670,106 @@ function BaseInstructionBuilder({
         ],
       };
     });
-    if (editor.location === "available") {
-      returnToLibrary();
-      return;
-    }
-    if (editor.location === "new") setAvailableOpen(false);
-    setEditor(null);
+    setEditor({
+      ...editor,
+      location: editor.location === "new" ? "active" : editor.location,
+      module: edited,
+      title: edited.title,
+      text: edited.text,
+      editing: false,
+    });
+    setFocusEditorBody(false);
+    setEditorError(null);
   };
-  const editorPanel = editor && (
-    <div className="base-prompt-editor" data-trait-no-drag>
-      <header className="base-prompt-editor-header">
-        <div className="min-w-0">
-          <PopoverTitle>
-            {editor.location === "new"
-              ? "Create trait"
-              : `Edit ${editor.module.title}`}
-          </PopoverTitle>
-          <PopoverDescription>
-            {editableInstructionModule(editor.module)
-              ? "Edit the trait name and body-only Markdown added to the shared base prompt."
-              : "Plugin instructions are read-only. Organize them from the category board."}
-          </PopoverDescription>
-        </div>
-        <PopoverClose
-          render={
-            <IconButton
-              aria-label="Close"
-              size="compact"
-              icon={<XIcon size={16} aria-hidden="true" />}
-            />
-          }
-        />
-      </header>
-      <div className="base-prompt-editor-fields">
+  const editorPanel = editor ? (
+    <TraitPanel autoFocusTitle={editor.location === "new"} close={closeEditor}>
+      <article className="base-prompt-editor-document">
         <TraitStateDetails module={editor.module} proposal={proposal} />
-        {editor.module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN && (
-          <Select
-            label="Category"
-            variant="field"
-            value={editor.module.category ?? "custom"}
-            groups={[
-              {
-                label: "Categories",
-                options: draft.composition.categories.map((category) => ({
-                  value: category.id,
-                  label: category.title,
-                })),
-              },
-            ]}
-            onValueChange={(category) =>
-              setEditor({
-                ...editor,
-                module: { ...editor.module, category },
-              })
-            }
-          />
-        )}
-        <Field label="Trait name" error={editorError}>
+        {editor.editing ? (
           <Input
             ref={editorName}
-            autoFocus
-            disabled={!editableInstructionModule(editor.module)}
-            textSize="large"
+            aria-label="Trait name"
+            aria-invalid={!!editorError}
+            autoFocus={editor.location === "new" || !focusEditorBody}
             value={editor.title}
             onChange={(event) => {
               setEditor({ ...editor, title: event.currentTarget.value });
               setEditorError(null);
             }}
           />
-        </Field>
-        <Field label="Instructions">
-          <div className="base-prompt-editor-instructions">
-            <Textarea
-              variant="code"
-              textSize="large"
-              rows={18}
-              disabled={!editableInstructionModule(editor.module)}
-              value={
-                editor.dirty ? editor.text : instructionEditorText(editor.text)
-              }
-              onChange={(event) =>
-                setEditor({
-                  ...editor,
-                  text: event.currentTarget.value,
-                  dirty: true,
-                })
-              }
-            />
-            {editorSource &&
-              editableInstructionModule(editor.module) &&
-              editorDiffersFromSource && (
-                <button
-                  type="button"
-                  className="base-prompt-editor-reset text-caption"
+        ) : (
+          <button
+            type="button"
+            className="base-prompt-editor-title"
+            disabled={!editableInstructionModule(editor.module)}
+            onClick={() => {
+              setFocusEditorBody(false);
+              setEditor({ ...editor, editing: true });
+            }}
+          >
+            <h1>{editor.title}</h1>
+          </button>
+        )}
+        {editorError && (
+          <p role="alert" className="m-0 text-body-sm text-danger">
+            {editorError}
+          </p>
+        )}
+        {editor.editing ? (
+          <TraitBodyEditor
+            value={editor.text}
+            focus={focusEditorBody}
+            onChange={(text) => {
+              setEditor({ ...editor, text });
+              setEditorError(null);
+            }}
+          />
+        ) : (
+          <TraitBody
+            text={editor.text}
+            editable={editableInstructionModule(editor.module)}
+            onEdit={() => {
+              setFocusEditorBody(true);
+              setEditor({ ...editor, editing: true });
+            }}
+          />
+        )}
+        {editor.editing && (
+          <footer className="base-prompt-editor-actions">
+            <div>
+              {editorSource && editorDiffersFromSource && (
+                <Button
+                  size="sm"
                   onClick={() => {
                     setEditor({
                       ...editor,
-                      module: {
-                        ...editorSource,
-                        order: editor.module.order,
-                        category:
-                          editor.module.category ??
-                          editorSource.category ??
-                          "uncategorized",
-                      },
                       title: editorSource.title,
-                      text: editorSource.text,
-                      dirty: false,
+                      text: instructionEditorText(editorSource.text),
                     });
                     setEditorError(null);
                   }}
                 >
                   Reset to default
-                </button>
+                </Button>
               )}
-          </div>
-        </Field>
-      </div>
-      <footer className="base-prompt-editor-actions">
-        <Button
-          onClick={() => {
-            if (editor.location === "active") setEditor(null);
-            else returnToLibrary();
-          }}
-        >
-          Cancel
-        </Button>
-        {editableInstructionModule(editor.module) && (
-          <Button variant="primary" onClick={saveEditor}>
-            Save trait
-          </Button>
+            </div>
+            <div className="base-prompt-editor-primary-actions">
+              <Button onClick={cancelEditor}>Cancel</Button>
+              <Button
+                variant="primary"
+                disabled={!editorChanged}
+                onClick={saveEditor}
+              >
+                Save trait
+              </Button>
+            </div>
+          </footer>
         )}
-      </footer>
-    </div>
-  );
+      </article>
+    </TraitPanel>
+  ) : undefined;
 
-  return (
+  const builder = (
     <section className="base-prompt-builder" aria-label="Base prompt builder">
       {proposal.error && <p role="alert">{proposal.error}</p>}
       {stale && (
@@ -801,33 +841,16 @@ function BaseInstructionBuilder({
             </dl>
           </section>
         </div>
-        <div
-          onPointerDownCapture={(event) => {
-            const value =
-              event.target instanceof Element
-                ? event.target.closest<HTMLElement>("[data-tab-value]")?.dataset
-                    .tabValue
-                : undefined;
-            if (value && value !== viewMode) switchingView.current = true;
-          }}
-        >
-          <Tabs
-            value={viewMode}
-            items={[
-              { value: "sections", label: "Sections" },
-              { value: "all", label: "All entries" },
-            ]}
-            label="Base prompt view"
-            variant="panel"
-            onValueChange={(value) => {
-              switchingView.current = true;
-              setViewMode(value);
-              window.setTimeout(() => {
-                switchingView.current = false;
-              });
-            }}
-          />
-        </div>
+        <Tabs
+          value={viewMode}
+          items={[
+            { value: "sections", label: "Sections" },
+            { value: "all", label: "All entries" },
+          ]}
+          label="Base prompt view"
+          variant="panel"
+          onValueChange={setViewMode}
+        />
         {viewMode === "all" && (
           <ul
             className="base-prompt-category-legend text-body-sm"
@@ -852,9 +875,7 @@ function BaseInstructionBuilder({
           ref={board}
           className="base-prompt-board"
           data-view-mode={viewMode}
-          data-has-selection={
-            editor?.location === "active" || availableOpen ? "true" : undefined
-          }
+          data-has-selection={editor || availableOpen ? "true" : undefined}
           aria-label="Prompt traits in sequence"
           onPointerMove={pointerMove}
           onPointerUp={pointerUp}
@@ -863,14 +884,10 @@ function BaseInstructionBuilder({
             {
               "--base-prompt-board-columns": boardMetrics.columns,
               "--base-prompt-board-cell": `${boardMetrics.cell}px`,
-              "--base-prompt-section-row": `${Math.min(
-                56,
-                boardMetrics.cell / 2,
-              )}px`,
             } as BoardStyle
           }
         >
-          {boardItems.map((item, boardIndex) => {
+          {boardItems.map((item) => {
             if ("tone" in item) {
               const category = item;
               const categoryIndex = draft.composition.categories.findIndex(
@@ -1053,22 +1070,18 @@ function BaseInstructionBuilder({
               prompt.length,
               boardMetrics.columns,
             );
-            const span = {
-              ...proportionalSpan,
-              columns:
-                viewMode === "sections"
-                  ? 1
-                  : Math.min(proportionalSpan.columns, 2),
-              rows:
-                viewMode === "sections"
-                  ? 2
-                  : Math.min(proportionalSpan.rows, 2),
-            };
+            const span =
+              viewMode === "all"
+                ? {
+                    ...proportionalSpan,
+                    columns: Math.min(proportionalSpan.columns, 2),
+                    rows: Math.min(proportionalSpan.rows, 2),
+                  }
+                : undefined;
             const offset =
               dragOffset?.key === module.key ? dragOffset : undefined;
             const editorOpen =
               editor?.location === "active" && editor.module.key === module.key;
-            const triggerId = `base-prompt-trait-${boardIndex}`;
             return (
               <li
                 key={module.key}
@@ -1078,7 +1091,7 @@ function BaseInstructionBuilder({
                 }}
                 data-trait-key={module.key}
                 data-category-tone={category.tone}
-                data-trait-units={span.units}
+                data-trait-units={span?.units}
                 data-drop-target={
                   dropTarget?.index === index && dragOffset?.key !== module.key
                     ? "true"
@@ -1089,70 +1102,38 @@ function BaseInstructionBuilder({
                 {...traitStateAttributes(module, proposal)}
                 className="base-prompt-trait"
                 style={{
-                  gridColumn: `span ${span.columns}`,
-                  gridRow: `span ${span.rows}`,
+                  gridColumn: span ? `span ${span.columns}` : undefined,
+                  gridRow: span ? `span ${span.rows}` : undefined,
                   transform: offset
                     ? `translate3d(${offset.x}px, ${offset.y}px, 0)`
                     : undefined,
                 }}
                 onPointerDown={(event) => pointerDown(event, module.key)}
               >
-                <PopoverRoot
-                  open={editorOpen}
-                  triggerId={triggerId}
-                  onOpenChange={(open, details) => {
-                    if (open) {
-                      if (suppressEdit.current) {
-                        details.cancel();
-                        return;
-                      }
-                      edit(module, "active");
-                    } else if (editorOpen && !switchingView.current) {
-                      setEditor(null);
-                    }
+                <button
+                  type="button"
+                  className="base-prompt-trait-open"
+                  aria-label={module.title}
+                  onClick={(event) => {
+                    if (suppressEdit.current) return;
+                    if (editorOpen) closeEditor();
+                    else edit(module, "active", undefined, event.currentTarget);
                   }}
                 >
-                  <PopoverTrigger
-                    id={triggerId}
-                    render={
-                      <button
-                        type="button"
-                        className="base-prompt-trait-open"
-                        aria-label={module.title}
-                      >
-                        <span className="base-prompt-trait-heading">
-                          <span className="base-prompt-trait-sequence text-caption">
-                            {sequence}
-                          </span>
-                        </span>
-                        <span className="base-prompt-board-title text-label">
-                          {module.title}
-                        </span>
-                        <span className="base-prompt-trait-cost text-body-sm text-secondary">
-                          ~
-                          {estimateInstructionTokens(
-                            module.text,
-                          ).toLocaleString()}{" "}
-                          tokens · {formatInstructionPercentage(percentage)}
-                        </span>
-                        <span className="sr-only">
-                          {category.title} category
-                        </span>
-                      </button>
-                    }
-                  />
-                  {editorOpen && (
-                    <PopoverPopup
-                      data-base-prompt-editor=""
-                      side={editor.side}
-                      align="start"
-                      size="wide"
-                      initialFocus={editorName}
-                    >
-                      {editorPanel}
-                    </PopoverPopup>
-                  )}
-                </PopoverRoot>
+                  <span className="base-prompt-trait-heading">
+                    <span className="base-prompt-trait-sequence text-caption">
+                      {sequence}
+                    </span>
+                  </span>
+                  <span className="base-prompt-board-title text-label">
+                    {module.title}
+                  </span>
+                  <span className="base-prompt-trait-cost text-body-sm text-secondary">
+                    ~{estimateInstructionTokens(module.text).toLocaleString()}{" "}
+                    tokens · {formatInstructionPercentage(percentage)}
+                  </span>
+                  <span className="sr-only">{category.title} category</span>
+                </button>
                 <div
                   className="base-prompt-trait-actions base-prompt-board-actions"
                   data-trait-no-drag
@@ -1272,7 +1253,11 @@ function BaseInstructionBuilder({
           })}
           <li
             className="base-prompt-add-row"
-            data-selected={availableOpen ? "true" : undefined}
+            data-selected={
+              availableOpen || (editor && editor.location !== "active")
+                ? "true"
+                : undefined
+            }
             hidden={viewMode === "sections"}
           >
             <PopoverRoot
@@ -1280,10 +1265,8 @@ function BaseInstructionBuilder({
               triggerId="base-prompt-add-trait"
               onOpenChange={(open) => {
                 setAvailableOpen(open);
-                if (!open && editor?.location !== "active") {
+                if (!open) {
                   setLibraryAnchor(null);
-                  setEditor(null);
-                  setEditorError(null);
                   setLibraryFocus(null);
                 }
               }}
@@ -1302,153 +1285,143 @@ function BaseInstructionBuilder({
                 }
               />
               <PopoverPopup
-                data-base-prompt-editor={
-                  editor && editor.location !== "active" ? "" : undefined
-                }
                 side="left"
                 align="end"
                 anchor={libraryAnchor ?? undefined}
                 finalFocus={libraryAnchor ? () => libraryAnchor : undefined}
                 size="wide"
-                initialFocus={
-                  editor && editor.location !== "active"
-                    ? editorName
-                    : undefined
-                }
               >
-                {editor && editor.location !== "active" ? (
-                  editorPanel
-                ) : (
-                  <div className="base-prompt-library-menu">
-                    <div>
-                      <PopoverTitle>Available traits</PopoverTitle>
-                      <PopoverDescription>
-                        Add defaults, reuse removed traits, or create your own.
-                      </PopoverDescription>
-                    </div>
-                    <Button
-                      ref={(node) => {
-                        if (node) libraryActions.current.set("new", node);
-                        else libraryActions.current.delete("new");
-                      }}
-                      size="sm"
-                      onClick={() => {
-                        const id = globalThis.crypto.randomUUID();
-                        edit(
-                          {
-                            key: `${LOCAL_INSTRUCTIONS_PLUGIN}/${id}`,
-                            title: "New trait",
-                            pluginId: LOCAL_INSTRUCTIONS_PLUGIN,
-                            revision: LOCAL_INSTRUCTIONS_REVISION,
-                            order: draft.composition.modules.length * 10,
-                            category: "custom",
-                            text: "",
-                          },
-                          "new",
-                          "new",
+                <div className="base-prompt-library-menu">
+                  <div>
+                    <PopoverTitle>Available traits</PopoverTitle>
+                    <PopoverDescription>
+                      Add defaults, reuse removed traits, or create your own.
+                    </PopoverDescription>
+                  </div>
+                  <Button
+                    ref={(node) => {
+                      if (node) libraryActions.current.set("new", node);
+                      else libraryActions.current.delete("new");
+                    }}
+                    size="sm"
+                    onClick={(event) => {
+                      const id = globalThis.crypto.randomUUID();
+                      edit(
+                        {
+                          key: `${LOCAL_INSTRUCTIONS_PLUGIN}/${id}`,
+                          title: "New trait",
+                          pluginId: LOCAL_INSTRUCTIONS_PLUGIN,
+                          revision: LOCAL_INSTRUCTIONS_REVISION,
+                          order: draft.composition.modules.length * 10,
+                          category: "custom",
+                          text: "",
+                        },
+                        "new",
+                        "new",
+                        event.currentTarget,
+                      );
+                    }}
+                  >
+                    <PlusIcon size={16} aria-hidden="true" />
+                    New trait
+                  </Button>
+                  {!!available.length && (
+                    <ul className="base-prompt-library-list">
+                      {available.map((module) => {
+                        const category = instructionCategory(
+                          module,
+                          draft.composition.categories,
                         );
-                      }}
-                    >
-                      <PlusIcon size={16} aria-hidden="true" />
-                      New trait
-                    </Button>
-                    {!!available.length && (
-                      <ul className="base-prompt-library-list">
-                        {available.map((module) => {
-                          const category = instructionCategory(
-                            module,
-                            draft.composition.categories,
-                          );
-                          return (
-                            <li
-                              key={module.key}
-                              className="base-prompt-available-trait"
-                              data-category-tone={category.tone}
-                              {...traitStateAttributes(module, proposal)}
+                        return (
+                          <li
+                            key={module.key}
+                            className="base-prompt-available-trait"
+                            data-category-tone={category.tone}
+                            {...traitStateAttributes(module, proposal)}
+                          >
+                            <span
+                              className="base-prompt-category-swatch"
+                              aria-hidden
+                            />
+                            <button
+                              ref={(node) => {
+                                if (node)
+                                  libraryActions.current.set(module.key, node);
+                                else libraryActions.current.delete(module.key);
+                              }}
+                              type="button"
+                              className="base-prompt-available-copy"
+                              aria-label={module.title}
+                              onClick={(event) =>
+                                edit(
+                                  module,
+                                  "available",
+                                  module.key,
+                                  event.currentTarget,
+                                )
+                              }
                             >
-                              <span
-                                className="base-prompt-category-swatch"
-                                aria-hidden
-                              />
-                              <button
-                                ref={(node) => {
-                                  if (node)
-                                    libraryActions.current.set(
-                                      module.key,
-                                      node,
-                                    );
-                                  else
-                                    libraryActions.current.delete(module.key);
-                                }}
-                                type="button"
-                                className="base-prompt-available-copy"
-                                aria-label={module.title}
-                                onClick={() =>
-                                  edit(module, "available", module.key)
-                                }
-                              >
-                                <span className="base-prompt-trait-title text-label">
-                                  {module.title}
-                                </span>
-                                <span className="text-body-sm text-secondary">
-                                  {category.title} · ~
-                                  {estimateInstructionTokens(
-                                    module.text,
-                                  ).toLocaleString()}{" "}
-                                  tokens
-                                </span>
-                              </button>
-                              <div className="base-prompt-trait-actions">
-                                {module.pluginId ===
-                                  LOCAL_INSTRUCTIONS_PLUGIN && (
-                                  <IconButton
-                                    size="compact"
-                                    aria-label={`Delete ${module.title}`}
-                                    icon={
-                                      <TrashIcon size={16} aria-hidden="true" />
-                                    }
-                                    onClick={() => {
-                                      setAvailableOpen(false);
-                                      setDeleting(module);
-                                    }}
-                                  />
-                                )}
-                                <Button
-                                  size="sm"
+                              <span className="base-prompt-trait-title text-label">
+                                {module.title}
+                              </span>
+                              <span className="text-body-sm text-secondary">
+                                {category.title} · ~
+                                {estimateInstructionTokens(
+                                  module.text,
+                                ).toLocaleString()}{" "}
+                                tokens
+                              </span>
+                            </button>
+                            <div className="base-prompt-trait-actions">
+                              {module.pluginId ===
+                                LOCAL_INSTRUCTIONS_PLUGIN && (
+                                <IconButton
+                                  size="compact"
+                                  aria-label={`Delete ${module.title}`}
+                                  icon={
+                                    <TrashIcon size={16} aria-hidden="true" />
+                                  }
                                   onClick={() => {
                                     setAvailableOpen(false);
-                                    mutate((current) => ({
-                                      ...current,
-                                      composition: {
-                                        ...current.composition,
-                                        modules: normalizedModules([
-                                          ...current.composition.modules,
-                                          module,
-                                        ]),
-                                      },
-                                      inactiveModules:
-                                        current.inactiveModules.filter(
-                                          (candidate) =>
-                                            candidate.key !== module.key,
-                                        ),
-                                    }));
+                                    setDeleting(module);
                                   }}
-                                >
-                                  Add
-                                </Button>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                    {!available.length && (
-                      <p className="m-0 text-body-sm text-secondary">
-                        Every available trait is already active.
-                      </p>
-                    )}
-                  </div>
-                )}
+                                />
+                              )}
+                              <Button
+                                size="sm"
+                                onClick={() => {
+                                  setAvailableOpen(false);
+                                  mutate((current) => ({
+                                    ...current,
+                                    composition: {
+                                      ...current.composition,
+                                      modules: normalizedModules([
+                                        ...current.composition.modules,
+                                        module,
+                                      ]),
+                                    },
+                                    inactiveModules:
+                                      current.inactiveModules.filter(
+                                        (candidate) =>
+                                          candidate.key !== module.key,
+                                      ),
+                                  }));
+                                }}
+                              >
+                                Add
+                              </Button>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {!available.length && (
+                    <p className="m-0 text-body-sm text-secondary">
+                      Every available trait is already active.
+                    </p>
+                  )}
+                </div>
               </PopoverPopup>
             </PopoverRoot>
           </li>
@@ -1581,6 +1554,160 @@ function BaseInstructionBuilder({
         />
       )}
     </section>
+  );
+  const requestLeave = (leave: () => void) =>
+    requestTransition(() => {
+      setEditor(null);
+      setEditorError(null);
+      leave();
+    });
+  return (
+    <>
+      <PanelFrame companion={editorPanel}>
+        {renderMain ? renderMain(builder, requestLeave) : builder}
+      </PanelFrame>
+      {discarding && editor && (
+        <AlertDialog
+          title={`Discard changes to ${editor.module.title}?`}
+          description="Your unsaved title and instruction changes will be lost."
+          onClose={() => setDiscarding(null)}
+          actions={
+            <>
+              <Button onClick={() => setDiscarding(null)}>Keep editing</Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  const transition = discarding;
+                  setDiscarding(null);
+                  transition();
+                }}
+              >
+                Discard changes
+              </Button>
+            </>
+          }
+        />
+      )}
+    </>
+  );
+}
+
+function TraitPanel({
+  autoFocusTitle,
+  close,
+  children,
+}: {
+  autoFocusTitle: boolean;
+  close(): void;
+  children: ReactNode;
+}) {
+  const closeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!autoFocusTitle) closeButton.current?.focus();
+  }, [autoFocusTitle]);
+  return (
+    <Panel
+      as="aside"
+      aria-label="Trait"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          close();
+        }
+      }}
+    >
+      <div className="base-prompt-editor-panel">
+        <PanelHeader
+          variant="compact"
+          title="Trait"
+          actions={
+            <IconButton
+              ref={closeButton}
+              size="toolbar"
+              aria-label="Close trait"
+              onClick={close}
+              icon={<XIcon size={18} aria-hidden="true" />}
+            />
+          }
+        />
+        <div className="base-prompt-editor-scroll">{children}</div>
+      </div>
+    </Panel>
+  );
+}
+
+function TraitBody({
+  text,
+  editable,
+  onEdit,
+}: {
+  text: string;
+  editable: boolean;
+  onEdit(): void;
+}) {
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: The rendered document becomes an editor while links retain their own behavior.
+    <div
+      className="base-prompt-editor-markdown"
+      {...(editable
+        ? { role: "button", tabIndex: 0, "aria-label": "Instructions" }
+        : { role: "document" })}
+      onClick={(event) => {
+        if (
+          editable &&
+          !(
+            event.target instanceof Element && event.target.closest("a, button")
+          )
+        )
+          onEdit();
+      }}
+      onKeyDown={(event) => {
+        if (editable && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onEdit();
+        }
+      }}
+    >
+      {text ? (
+        <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+      ) : (
+        <p className="text-secondary">Click to add instructions.</p>
+      )}
+    </div>
+  );
+}
+
+function TraitBodyEditor({
+  value,
+  focus,
+  onChange,
+}: {
+  value: string;
+  focus: boolean;
+  onChange(value: string): void;
+}) {
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const element = textarea.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  });
+  useEffect(() => {
+    const element = textarea.current;
+    if (!element || !focus) return;
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+  }, [focus]);
+  return (
+    <Textarea
+      ref={textarea}
+      aria-label="Instructions"
+      variant="code"
+      rows={1}
+      value={value}
+      onChange={(event) => onChange(event.currentTarget.value)}
+    />
   );
 }
 
