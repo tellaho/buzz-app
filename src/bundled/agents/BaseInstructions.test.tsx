@@ -251,8 +251,21 @@ it("stages accessible reordering, retained removal and custom trait creation", a
     );
   }
   const view = render(<Harness />);
+  const board = screen.getByRole("list", {
+    name: "Prompt traits in sequence",
+  });
 
   expect(screen.queryByText("proposed instructions")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Available traits" })).toBeNull();
+  expect(board.querySelectorAll("[data-trait-units]")).toHaveLength(2);
+  expect(
+    [...board.querySelectorAll<HTMLElement>("[data-trait-units]")].every(
+      (tile) => Number(tile.dataset.traitUnits) >= 1,
+    ),
+  ).toBe(true);
+  expect(
+    screen.getByRole("list", { name: "Approximate prompt cost by category" }),
+  ).toHaveTextContent(/Plugin\s*~10\s*·\s*100%/);
   await user.click(screen.getByRole("button", { name: "Core" }));
   expect(screen.getByRole("dialog", { name: "Edit Core" })).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -262,18 +275,94 @@ it("stages accessible reordering, retained removal and custom trait creation", a
   expect(screen.getByRole("dialog", { name: "Edit Core" })).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-  await user.click(screen.getByRole("button", { name: "Actions for Core" }));
-  await user.click(await screen.findByRole("menuitem", { name: "Move down" }));
+  const coreRow = screen
+    .getByRole("button", { name: "Core" })
+    .closest<HTMLElement>("[data-trait-key]");
+  const secondRow = screen
+    .getByRole("button", { name: "Second" })
+    .closest<HTMLElement>("[data-trait-key]");
+  if (!coreRow || !secondRow) throw new Error("Expected prompt tiles");
+  const originalElementsFromPoint = document.elementsFromPoint;
+  Object.defineProperty(document, "elementsFromPoint", {
+    configurable: true,
+    value: () => [coreRow],
+  });
+  try {
+    fireEvent.pointerDown(secondRow, {
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+      isPrimary: true,
+      pointerId: 7,
+    });
+    fireEvent.pointerMove(secondRow, {
+      clientX: 30,
+      clientY: 30,
+      isPrimary: true,
+      pointerId: 7,
+    });
+    expect(secondRow).toHaveAttribute("data-dragging", "true");
+    fireEvent.pointerUp(secondRow, { pointerId: 7 });
+  } finally {
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      value: originalElementsFromPoint,
+    });
+  }
   expect(
     [...view.container.querySelectorAll("[data-trait-key]")].map((row) =>
       row.getAttribute("data-trait-key"),
     ),
   ).toEqual(["fixture/second", "fixture/core"]);
+
+  Object.defineProperty(document, "elementsFromPoint", {
+    configurable: true,
+    value: () => [secondRow],
+  });
+  fireEvent.pointerDown(coreRow, {
+    button: 0,
+    clientX: 10,
+    clientY: 10,
+    isPrimary: true,
+    pointerId: 8,
+  });
+  fireEvent.pointerMove(coreRow, {
+    clientX: 30,
+    clientY: 30,
+    isPrimary: true,
+    pointerId: 8,
+  });
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(coreRow).not.toHaveAttribute("data-dragging");
+  fireEvent.pointerUp(coreRow, { pointerId: 8 });
+  Object.defineProperty(document, "elementsFromPoint", {
+    configurable: true,
+    value: originalElementsFromPoint,
+  });
+  expect(
+    [...view.container.querySelectorAll("[data-trait-key]")].map((row) =>
+      row.getAttribute("data-trait-key"),
+    ),
+  ).toEqual(["fixture/second", "fixture/core"]);
+
+  await user.click(screen.getByRole("button", { name: "Actions for Core" }));
+  await user.click(
+    await screen.findByRole("menuitem", { name: "Move earlier" }),
+  );
   await user.click(screen.getByRole("button", { name: "Actions for Second" }));
   await user.click(await screen.findByRole("menuitem", { name: "Remove" }));
-  expect(screen.getByRole("button", { name: "Add" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Add trait" }));
+  const availableMenu = await screen.findByRole("dialog", {
+    name: "Available traits",
+  });
+  expect(
+    within(availableMenu).getByRole("button", { name: "Add" }),
+  ).toBeTruthy();
+  expect(availableMenu).toHaveTextContent("Plugin · ~5 tokens");
 
-  fireEvent.click(screen.getByRole("button", { name: "New trait" }));
+  fireEvent.click(
+    within(availableMenu).getByRole("button", { name: "New trait" }),
+  );
   fireEvent.change(screen.getByLabelText("Trait name"), {
     target: { value: "Curiosity" },
   });
@@ -282,11 +371,24 @@ it("stages accessible reordering, retained removal and custom trait creation", a
   });
   fireEvent.click(screen.getByRole("button", { name: "Save trait" }));
   expect(screen.getByRole("button", { name: "Curiosity" })).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: "Curiosity" })
+      .closest("[data-trait-category]"),
+  ).toHaveAttribute("data-trait-category", "custom");
+  expect(
+    screen.getByRole("list", { name: "Approximate prompt cost by category" }),
+  ).toHaveTextContent("Custom");
   await user.click(
     screen.getByRole("button", { name: "Actions for Curiosity" }),
   );
   await user.click(await screen.findByRole("menuitem", { name: "Remove" }));
-  expect(screen.getByRole("button", { name: "Delete Curiosity" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Add trait" }));
+  expect(
+    within(
+      await screen.findByRole("dialog", { name: "Available traits" }),
+    ).getByRole("button", { name: "Delete Curiosity" }),
+  ).toBeTruthy();
   control.dispose();
 });
 
@@ -385,39 +487,51 @@ it("shows compact origin and modification states in both trait lists", async () 
   const modifiedPluginRow = screen
     .getByRole("button", { name: "Plugin behavior" })
     .closest("li");
-  const customRow = screen
+  await user.click(screen.getByRole("button", { name: "Add trait" }));
+  let availableMenu = await screen.findByRole("dialog", {
+    name: "Available traits",
+  });
+  const customRow = within(availableMenu)
     .getByRole("button", { name: "Custom behavior" })
     .closest("li");
   expect(defaultRow).toHaveAttribute("data-trait-origin", "default");
   expect(defaultRow).not.toHaveAttribute("data-trait-modified");
   expect(
     within(defaultRow as HTMLElement).getByRole("img", {
-      name: "Default trait",
+      name: "Core category",
     }),
   ).toBeTruthy();
   expect(modifiedPluginRow).toHaveAttribute("data-trait-origin", "plugin");
   expect(modifiedPluginRow).toHaveAttribute("data-trait-modified", "true");
   expect(
     within(modifiedPluginRow as HTMLElement).getByRole("img", {
-      name: "Plugin trait, modified",
+      name: "Plugin category, modified",
     }),
   ).toBeTruthy();
   expect(customRow).toHaveAttribute("data-trait-origin", "custom");
   expect(
     within(customRow as HTMLElement).getByRole("img", {
-      name: "Custom trait",
+      name: "Custom category",
     }),
   ).toBeTruthy();
 
-  await user.click(screen.getByRole("button", { name: "Custom behavior" }));
+  await user.click(
+    within(availableMenu).getByRole("button", { name: "Custom behavior" }),
+  );
   expect(
     screen.getByRole("dialog", { name: "Edit Custom behavior" }),
   ).toBeTruthy();
   expect(screen.getByText("Created in this app profile.")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "Cancel" }));
 
+  await user.click(screen.getByRole("button", { name: "Add trait" }));
+  availableMenu = await screen.findByRole("dialog", {
+    name: "Available traits",
+  });
   await user.click(
-    screen.getByRole("button", { name: "Unavailable behavior" }),
+    within(availableMenu).getByRole("button", {
+      name: "Unavailable behavior",
+    }),
   );
   expect(
     screen.getByText(

@@ -3,7 +3,9 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from "react";
 import type {
   AgentInstructions,
@@ -17,14 +19,16 @@ import type {
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  ChatCircleIcon,
   DotsThreeIcon,
-  DotsSixVerticalIcon,
   FileTextIcon,
+  GitBranchIcon,
   PencilSimpleIcon,
   PlusIcon,
   SquaresFourIcon,
   TrashIcon,
   UserIcon,
+  WrenchIcon,
 } from "../../shared/design-system/icons";
 import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -39,21 +43,34 @@ import {
   MenuRoot,
   MenuTrigger,
 } from "../../shared/design-system/ui/Menu";
+import {
+  PopoverDescription,
+  PopoverPopup,
+  PopoverRoot,
+  PopoverTitle,
+  PopoverTrigger,
+} from "../../shared/design-system/ui/Popover";
 import { Textarea } from "../../shared/design-system/ui/Textarea";
 import {
   availableInstructionModules,
   DEFAULT_INSTRUCTIONS_PLUGIN,
+  estimateInstructionTokens,
+  instructionBoardColumns,
+  instructionCategory,
+  instructionCategorySummaries,
   instructionEditorText,
   instructionDraft,
   instructionDraftChanged,
-  instructionGroup,
   instructionModuleState,
+  instructionPercentage,
   instructionTextWithBoundary,
+  instructionTileSpan,
   LOCAL_INSTRUCTIONS_PLUGIN,
   LOCAL_INSTRUCTIONS_REVISION,
   normalizedModules,
   preparedInstructionDraft,
   sourceModule,
+  type InstructionCategory,
   type InstructionModuleState,
   type MutableInstructionDraft,
 } from "./base-instruction-draft";
@@ -68,8 +85,21 @@ type Editor = {
 type Drag = {
   key: string;
   pointerId: number;
+  startX: number;
   startY: number;
   started: boolean;
+  targets: {
+    key: string;
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+  }[];
+};
+type DragOffset = { key: string; x: number; y: number };
+type BoardStyle = CSSProperties & {
+  "--base-prompt-board-columns": number;
+  "--base-prompt-board-cell": string;
 };
 
 /** Global profile editor. Drafts remain local until one CAS-pinned adoption. */
@@ -117,16 +147,26 @@ function BaseInstructionBuilder({
   const [editor, setEditor] = useState<Editor | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<SavedModule | null>(null);
+  const [openActions, setOpenActions] = useState<string | null>(null);
+  const [availableOpen, setAvailableOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const board = useRef<HTMLOListElement>(null);
+  const boardMetrics = useInstructionBoard(board);
   const drag = useRef<Drag | null>(null);
+  const suppressEdit = useRef(false);
+  const [dragOffset, setDragOffset] = useState<DragOffset | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
+  const dragging = dragOffset !== null;
   const stale = saved.revision !== baseRevision;
   const changed = instructionDraftChanged(draft, saved, proposal);
   const prepared = preparedInstructionDraft(draft, proposal);
   const prompt = draft.composition.modules
     .map((module) => module.text)
     .join("");
+  const categorySummaries = instructionCategorySummaries(
+    draft.composition.modules,
+  );
   const pending =
     state.data?.agents.filter(
       (agent) =>
@@ -137,11 +177,6 @@ function BaseInstructionBuilder({
   const editorSource = editor
     ? sourceModule(editor.module.key, proposal)
     : undefined;
-  const groups = new Map<string, SavedModule[]>();
-  for (const module of available) {
-    const group = instructionGroup(module);
-    groups.set(group, [...(groups.get(group) ?? []), module]);
-  }
 
   const mutate = (
     update: (current: MutableInstructionDraft) => MutableInstructionDraft,
@@ -182,88 +217,130 @@ function BaseInstructionBuilder({
   };
   const stopDrag = () => {
     drag.current = null;
+    setDragOffset(null);
     setDropAt(null);
   };
   useEffect(() => {
-    if (dropAt === null) return;
+    if (!dragging) return;
     const cancel = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         drag.current = null;
+        setDragOffset(null);
         setDropAt(null);
       }
     };
     window.addEventListener("keydown", cancel);
     return () => window.removeEventListener("keydown", cancel);
-  }, [dropAt]);
+  }, [dragging]);
   const pointerDown = (
-    event: ReactPointerEvent<HTMLButtonElement>,
+    event: ReactPointerEvent<HTMLLIElement>,
     key: string,
   ) => {
-    if (event.button !== 0) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    if (
+      event.button !== 0 ||
+      !event.isPrimary ||
+      (event.target instanceof Element &&
+        event.target.closest("[data-trait-no-drag]"))
+    )
+      return;
     drag.current = {
       key,
       pointerId: event.pointerId,
+      startX: event.clientX,
       startY: event.clientY,
       started: false,
+      targets: [
+        ...(board.current?.querySelectorAll<HTMLElement>("[data-trait-key]") ??
+          []),
+      ].map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return {
+          key: element.dataset.traitKey ?? "",
+          left: bounds.left,
+          top: bounds.top,
+          right: bounds.right,
+          bottom: bounds.bottom,
+        };
+      }),
     };
   };
-  const pointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const pointerMove = (event: ReactPointerEvent<HTMLOListElement>) => {
     const active = drag.current;
     if (!active || active.pointerId !== event.pointerId) return;
-    if (!active.started && Math.abs(event.clientY - active.startY) < 5) return;
+    const x = event.clientX - active.startX;
+    const y = event.clientY - active.startY;
+    if (!active.started && Math.hypot(x, y) < 6) return;
+    if (!active.started) {
+      const source = [...event.currentTarget.children].find(
+        (element) =>
+          element instanceof HTMLElement &&
+          element.dataset.traitKey === active.key,
+      );
+      if (source instanceof HTMLElement)
+        source.setPointerCapture?.(event.pointerId);
+    }
     active.started = true;
-    const row = document
-      .elementsFromPoint(event.clientX, event.clientY)
+    setDragOffset({ key: active.key, x, y });
+    const geometricTarget = active.targets.find(
+      (target) =>
+        target.key !== active.key &&
+        event.clientX >= target.left &&
+        event.clientX <= target.right &&
+        event.clientY >= target.top &&
+        event.clientY <= target.bottom,
+    );
+    const hitTarget = document
+      .elementsFromPoint?.(event.clientX, event.clientY)
       .map((element) => element.closest<HTMLElement>("[data-trait-key]"))
-      .find(Boolean);
-    if (!row) {
-      setDropAt(draft.composition.modules.length);
+      .find((element) => element && element.dataset.traitKey !== active.key);
+    const targetKey = geometricTarget?.key ?? hitTarget?.dataset.traitKey;
+    if (!targetKey) {
+      const bounds = board.current?.getBoundingClientRect();
+      if (
+        bounds &&
+        event.clientX >= bounds.left &&
+        event.clientX <= bounds.right &&
+        event.clientY >= bounds.top &&
+        event.clientY <= bounds.bottom
+      ) {
+        const from = draft.composition.modules.findIndex(
+          (module) => module.key === active.key,
+        );
+        const otherBottoms = active.targets
+          .filter((target) => target.key !== active.key)
+          .map((target) => target.bottom);
+        const afterContent =
+          otherBottoms.length > 0 && event.clientY > Math.max(...otherBottoms);
+        setDropAt(afterContent ? draft.composition.modules.length - 1 : from);
+      }
       return;
     }
     const index = draft.composition.modules.findIndex(
-      (module) => module.key === row.dataset.traitKey,
+      (module) => module.key === targetKey,
     );
     if (index < 0) return;
-    setDropAt(
-      event.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2
-        ? index + 1
-        : index,
-    );
+    setDropAt(index);
   };
-  const pointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const pointerUp = (event: ReactPointerEvent<HTMLOListElement>) => {
     const active = drag.current;
     if (!active || active.pointerId !== event.pointerId) return;
     if (active.started && dropAt !== null) {
       const from = draft.composition.modules.findIndex(
         (module) => module.key === active.key,
       );
-      let to = dropAt;
-      if (to > from) to -= 1;
-      move(
-        from,
-        Math.max(0, Math.min(to, draft.composition.modules.length - 1)),
-      );
+      move(from, dropAt);
+    }
+    if (active.started) {
+      suppressEdit.current = true;
+      window.setTimeout(() => {
+        suppressEdit.current = false;
+      });
     }
     stopDrag();
   };
 
   return (
     <section className="base-prompt-builder" aria-label="Base prompt builder">
-      <div className="base-prompt-summary">
-        <div>
-          <h2 className="m-0 text-heading">Build your base prompt</h2>
-          <p className="m-0 text-body-sm text-secondary">
-            Shape the shared traits and behaviors used by every local agent.
-          </p>
-        </div>
-        <p className="m-0 text-body-sm text-secondary" role="status">
-          Saved revision {saved.revision} · approximately{" "}
-          {Math.ceil(prompt.length / 4).toLocaleString()} tokens · {pending}{" "}
-          running {pending === 1 ? "agent needs" : "agents need"} restart
-        </p>
-      </div>
-
       {proposal.error && <p role="alert">{proposal.error}</p>}
       {stale && (
         <p role="alert" className="text-danger">
@@ -287,52 +364,249 @@ function BaseInstructionBuilder({
         {notice}
       </p>
 
-      <div className="base-prompt-columns">
-        <section
-          className="base-prompt-stack"
-          aria-labelledby="active-traits-title"
+      <section className="base-prompt-stack" aria-label="Base prompt traits">
+        <div className="base-prompt-toolbar">
+          <p className="m-0 text-body-sm text-secondary" role="status">
+            {draft.composition.modules.length} active traits · approximately{" "}
+            {estimateInstructionTokens(prompt).toLocaleString()} tokens · Saved
+            revision {saved.revision} · {pending} running{" "}
+            {pending === 1 ? "agent needs" : "agents need"} restart
+          </p>
+          <PopoverRoot open={availableOpen} onOpenChange={setAvailableOpen}>
+            <PopoverTrigger
+              render={
+                <IconButton
+                  size="compact"
+                  aria-label="Add trait"
+                  title="Add trait"
+                  icon={<PlusIcon size={16} aria-hidden="true" />}
+                />
+              }
+            />
+            <PopoverPopup align="end" size="wide">
+              <div className="base-prompt-library-menu">
+                <div>
+                  <PopoverTitle>Available traits</PopoverTitle>
+                  <PopoverDescription>
+                    Add defaults, reuse removed traits, or create your own.
+                  </PopoverDescription>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setAvailableOpen(false);
+                    const id = globalThis.crypto.randomUUID();
+                    edit(
+                      {
+                        key: `${LOCAL_INSTRUCTIONS_PLUGIN}/${id}`,
+                        title: "New trait",
+                        pluginId: LOCAL_INSTRUCTIONS_PLUGIN,
+                        revision: LOCAL_INSTRUCTIONS_REVISION,
+                        order: draft.composition.modules.length * 10,
+                        text: "",
+                      },
+                      "new",
+                    );
+                  }}
+                >
+                  <PlusIcon size={16} aria-hidden="true" />
+                  New trait
+                </Button>
+                {!!available.length && (
+                  <ul className="base-prompt-library-list">
+                    {available.map((module) => {
+                      const category = instructionCategory(module);
+                      return (
+                        <li
+                          key={module.key}
+                          className="base-prompt-available-trait"
+                          data-trait-category={categoryKey(category)}
+                          {...traitStateAttributes(module, proposal)}
+                        >
+                          <span
+                            className="base-prompt-category-swatch"
+                            aria-hidden
+                          />
+                          <TraitCategoryIcon
+                            category={category}
+                            state={instructionModuleState(module, proposal)}
+                          />
+                          <button
+                            type="button"
+                            className="base-prompt-available-copy"
+                            aria-label={module.title}
+                            onClick={() => {
+                              setAvailableOpen(false);
+                              edit(module, "available");
+                            }}
+                          >
+                            <span className="base-prompt-trait-title text-label">
+                              {module.title}
+                            </span>
+                            <span className="text-body-sm text-secondary">
+                              {category} · ~
+                              {estimateInstructionTokens(
+                                module.text,
+                              ).toLocaleString()}{" "}
+                              tokens
+                            </span>
+                          </button>
+                          <div className="base-prompt-trait-actions">
+                            {module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN && (
+                              <IconButton
+                                size="compact"
+                                aria-label={`Delete ${module.title}`}
+                                icon={
+                                  <TrashIcon size={16} aria-hidden="true" />
+                                }
+                                onClick={() => {
+                                  setAvailableOpen(false);
+                                  setDeleting(module);
+                                }}
+                              />
+                            )}
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setAvailableOpen(false);
+                                mutate((current) => ({
+                                  ...current,
+                                  composition: {
+                                    ...current.composition,
+                                    modules: normalizedModules([
+                                      ...current.composition.modules,
+                                      module,
+                                    ]),
+                                  },
+                                  inactiveModules:
+                                    current.inactiveModules.filter(
+                                      (candidate) =>
+                                        candidate.key !== module.key,
+                                    ),
+                                }));
+                              }}
+                            >
+                              Add
+                            </Button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {!available.length && (
+                  <p className="m-0 text-body-sm text-secondary">
+                    Every available trait is already active.
+                  </p>
+                )}
+              </div>
+            </PopoverPopup>
+          </PopoverRoot>
+        </div>
+        <ul
+          className="base-prompt-category-legend text-body-sm"
+          aria-label="Approximate prompt cost by category"
         >
-          <div className="base-prompt-section-heading">
-            <div>
-              <h3 id="active-traits-title" className="m-0 text-label">
-                Your base prompt
-              </h3>
-              <p className="m-0 text-body-sm text-secondary">
-                {draft.composition.modules.length} active traits
-              </p>
-            </div>
-          </div>
-          <ol className="base-prompt-list">
-            {draft.composition.modules.map((module, index) => (
+          {categorySummaries.map((summary) => (
+            <li
+              key={summary.category}
+              data-trait-category={categoryKey(summary.category)}
+            >
+              <span className="base-prompt-category-swatch" aria-hidden />
+              <span>{summary.category}</span>
+              <span className="text-secondary">
+                ~{summary.tokens.toLocaleString()} ·{" "}
+                {formatInstructionPercentage(summary.percentage)}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <ol
+          ref={board}
+          className="base-prompt-board"
+          aria-label="Prompt traits in sequence"
+          onPointerMove={pointerMove}
+          onPointerUp={pointerUp}
+          onPointerCancel={stopDrag}
+          style={
+            {
+              "--base-prompt-board-columns": boardMetrics.columns,
+              "--base-prompt-board-cell": `${boardMetrics.cell}px`,
+            } as BoardStyle
+          }
+        >
+          {draft.composition.modules.map((module, index) => {
+            const category = instructionCategory(module);
+            const percentage = instructionPercentage(
+              module.text.length,
+              prompt.length,
+            );
+            const span = instructionTileSpan(
+              module.text.length,
+              prompt.length,
+              boardMetrics.columns,
+            );
+            const offset =
+              dragOffset?.key === module.key ? dragOffset : undefined;
+            return (
               <li
                 key={module.key}
                 data-trait-key={module.key}
+                data-trait-category={categoryKey(category)}
+                data-trait-units={span.units}
+                data-drop-target={
+                  dropAt === index && dragOffset?.key !== module.key
+                    ? "true"
+                    : undefined
+                }
+                data-dragging={offset ? "true" : undefined}
                 {...traitStateAttributes(module, proposal)}
-                data-drop-before={dropAt === index || undefined}
                 className="base-prompt-trait"
+                style={{
+                  gridColumn: `span ${span.columns}`,
+                  gridRow: `span ${span.rows}`,
+                  transform: offset
+                    ? `translate3d(${offset.x}px, ${offset.y}px, 0)`
+                    : undefined,
+                }}
+                onPointerDown={(event) => pointerDown(event, module.key)}
               >
-                <IconButton
-                  size="compact"
-                  aria-label={`Drag ${module.title} to reorder`}
-                  title={`Drag ${module.title} to reorder`}
-                  icon={<DotsSixVerticalIcon size={16} aria-hidden="true" />}
-                  onPointerDown={(event) => pointerDown(event, module.key)}
-                  onPointerMove={pointerMove}
-                  onPointerUp={pointerUp}
-                  onPointerCancel={stopDrag}
-                />
-                <TraitStateIcon
-                  state={instructionModuleState(module, proposal)}
-                />
                 <button
                   type="button"
-                  className="base-prompt-trait-title text-label"
-                  onClick={() => edit(module, "active")}
+                  className="base-prompt-trait-open"
+                  aria-label={module.title}
+                  onClick={() => {
+                    if (!suppressEdit.current) edit(module, "active");
+                  }}
                 >
-                  {module.title}
+                  <span className="base-prompt-trait-heading">
+                    <span className="base-prompt-trait-sequence text-caption">
+                      {index + 1}
+                    </span>
+                    <TraitCategoryIcon
+                      category={category}
+                      state={instructionModuleState(module, proposal)}
+                    />
+                  </span>
+                  <span className="base-prompt-board-title text-label">
+                    {module.title}
+                  </span>
+                  <span className="base-prompt-trait-cost text-body-sm text-secondary">
+                    ~{estimateInstructionTokens(module.text).toLocaleString()}{" "}
+                    tokens · {formatInstructionPercentage(percentage)}
+                  </span>
+                  <span className="sr-only">{category} category</span>
                 </button>
-                <div className="base-prompt-trait-actions">
-                  <MenuRoot>
+                <div
+                  className="base-prompt-trait-actions base-prompt-board-actions"
+                  data-trait-no-drag
+                >
+                  <MenuRoot
+                    open={openActions === module.key}
+                    onOpenChange={(open) =>
+                      setOpenActions(open ? module.key : null)
+                    }
+                  >
                     <MenuTrigger
                       render={
                         <IconButton
@@ -342,8 +616,13 @@ function BaseInstructionBuilder({
                         />
                       }
                     />
-                    <MenuPopup align="end" size="compact">
-                      <MenuItem onClick={() => edit(module, "active")}>
+                    <MenuPopup align="end" size="compact" data-trait-no-drag>
+                      <MenuItem
+                        onClick={() => {
+                          setOpenActions(null);
+                          edit(module, "active");
+                        }}
+                      >
                         <MenuIcon>
                           <PencilSimpleIcon size={16} />
                         </MenuIcon>
@@ -351,28 +630,35 @@ function BaseInstructionBuilder({
                       </MenuItem>
                       <MenuItem
                         disabled={index === 0}
-                        onClick={() => move(index, index - 1)}
+                        onClick={() => {
+                          setOpenActions(null);
+                          move(index, index - 1);
+                        }}
                       >
                         <MenuIcon>
                           <ArrowUpIcon size={16} />
                         </MenuIcon>
-                        Move up
+                        Move earlier
                       </MenuItem>
                       <MenuItem
                         disabled={
                           index === draft.composition.modules.length - 1
                         }
-                        onClick={() => move(index, index + 1)}
+                        onClick={() => {
+                          setOpenActions(null);
+                          move(index, index + 1);
+                        }}
                       >
                         <MenuIcon>
                           <ArrowDownIcon size={16} />
                         </MenuIcon>
-                        Move down
+                        Move later
                       </MenuItem>
                       <MenuItem
                         tone="danger"
                         disabled={draft.composition.modules.length === 1}
                         onClick={() => {
+                          setOpenActions(null);
                           mutate((current) => ({
                             ...current,
                             composition: {
@@ -401,109 +687,10 @@ function BaseInstructionBuilder({
                   </MenuRoot>
                 </div>
               </li>
-            ))}
-            {dropAt === draft.composition.modules.length && (
-              <li className="base-prompt-drop-end" aria-hidden="true" />
-            )}
-          </ol>
-        </section>
-
-        <section
-          className="base-prompt-library"
-          aria-labelledby="available-traits-title"
-        >
-          <div className="base-prompt-section-heading">
-            <div>
-              <h3 id="available-traits-title" className="m-0 text-label">
-                Available traits
-              </h3>
-              <p className="m-0 text-body-sm text-secondary">
-                Add defaults or reuse traits you removed.
-              </p>
-            </div>
-            <Button
-              size="sm"
-              onClick={() => {
-                const id = globalThis.crypto.randomUUID();
-                edit(
-                  {
-                    key: `${LOCAL_INSTRUCTIONS_PLUGIN}/${id}`,
-                    title: "New trait",
-                    pluginId: LOCAL_INSTRUCTIONS_PLUGIN,
-                    revision: LOCAL_INSTRUCTIONS_REVISION,
-                    order: draft.composition.modules.length * 10,
-                    text: "",
-                  },
-                  "new",
-                );
-              }}
-            >
-              <PlusIcon size={16} aria-hidden="true" />
-              New trait
-            </Button>
-          </div>
-          {[...groups].map(([group, modules]) => (
-            <section key={group} className="base-prompt-library-group">
-              <h4 className="m-0 text-body-sm text-secondary">{group}</h4>
-              <ul className="base-prompt-library-list">
-                {modules.map((module) => (
-                  <li
-                    key={module.key}
-                    className="base-prompt-available-trait"
-                    {...traitStateAttributes(module, proposal)}
-                  >
-                    <TraitStateIcon
-                      state={instructionModuleState(module, proposal)}
-                    />
-                    <button
-                      type="button"
-                      className="base-prompt-trait-title text-label"
-                      onClick={() => edit(module, "available")}
-                    >
-                      {module.title}
-                    </button>
-                    <div className="base-prompt-trait-actions">
-                      {module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN && (
-                        <IconButton
-                          size="compact"
-                          aria-label={`Delete ${module.title}`}
-                          icon={<TrashIcon size={16} aria-hidden="true" />}
-                          onClick={() => setDeleting(module)}
-                        />
-                      )}
-                      <Button
-                        size="sm"
-                        onClick={() =>
-                          mutate((current) => ({
-                            ...current,
-                            composition: {
-                              ...current.composition,
-                              modules: normalizedModules([
-                                ...current.composition.modules,
-                                module,
-                              ]),
-                            },
-                            inactiveModules: current.inactiveModules.filter(
-                              (candidate) => candidate.key !== module.key,
-                            ),
-                          }))
-                        }
-                      >
-                        Add
-                      </Button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-          {!available.length && (
-            <p className="m-0 text-body-sm text-secondary">
-              Every available trait is already active.
-            </p>
-          )}
-        </section>
-      </div>
+            );
+          })}
+        </ol>
+      </section>
 
       <div className="base-prompt-footer">
         <p className="m-0 text-body-sm text-secondary">
@@ -723,18 +910,30 @@ function BaseInstructionBuilder({
   );
 }
 
-function TraitStateIcon({ state }: { state: InstructionModuleState }) {
+function TraitCategoryIcon({
+  category,
+  state,
+}: {
+  category: InstructionCategory;
+  state: InstructionModuleState;
+}) {
   const Icon =
-    state.origin === "default"
+    category === "Core"
       ? FileTextIcon
-      : state.origin === "plugin"
-        ? SquaresFourIcon
-        : UserIcon;
-  const label = `${originLabel(state.origin)}${state.modified ? ", modified" : ""}`;
+      : category === "Capabilities"
+        ? WrenchIcon
+        : category === "Communication"
+          ? ChatCircleIcon
+          : category === "Practice"
+            ? GitBranchIcon
+            : category === "Plugin"
+              ? SquaresFourIcon
+              : UserIcon;
+  const label = `${category} category${state.modified ? ", modified" : ""}`;
   return (
     <span
       className="base-prompt-trait-state"
-      data-trait-origin={state.origin}
+      data-trait-category={categoryKey(category)}
       data-trait-modified={state.modified || undefined}
       role="img"
       aria-label={label}
@@ -770,6 +969,7 @@ function TraitStateDetails({
   proposal: ReturnType<AgentInstructions["snapshot"]>;
 }) {
   const state = instructionModuleState(module, proposal);
+  const category = instructionCategory(module);
   const title = `${state.modified ? "Modified " : ""}${originLabel(state.origin)}`;
   const detail =
     state.origin === "custom"
@@ -781,7 +981,7 @@ function TraitStateDetails({
           : `${sourceLabel(module)} Matches the current source.`;
   return (
     <div className="base-prompt-trait-details">
-      <TraitStateIcon state={state} />
+      <TraitCategoryIcon category={category} state={state} />
       <div className="min-w-0">
         <p className="m-0 text-label">{title}</p>
         <p className="m-0 text-body-sm text-secondary">{detail}</p>
@@ -800,4 +1000,39 @@ function sourceLabel(module: SavedModule) {
   return module.pluginId === DEFAULT_INSTRUCTIONS_PLUGIN
     ? "Source: Buzz defaults."
     : `Source: ${module.pluginId}.`;
+}
+
+function categoryKey(category: InstructionCategory) {
+  return category.toLowerCase();
+}
+
+function formatInstructionPercentage(percentage: number) {
+  if (percentage > 0 && percentage < 1) return "<1%";
+  return `${Math.round(percentage)}%`;
+}
+
+function useInstructionBoard(board: RefObject<HTMLOListElement | null>) {
+  const [metrics, setMetrics] = useState({ columns: 6, cell: 96 });
+  useEffect(() => {
+    const element = board.current;
+    if (!element) return;
+    const measure = () => {
+      const width = element.clientWidth;
+      if (!width) return;
+      const columns = instructionBoardColumns(width);
+      const gap = Number.parseFloat(getComputedStyle(element).columnGap) || 8;
+      const cell = Math.max(1, (width - gap * (columns - 1)) / columns);
+      setMetrics((current) =>
+        current.columns === columns && Math.abs(current.cell - cell) < 0.5
+          ? current
+          : { columns, cell },
+      );
+    };
+    measure();
+    if (!globalThis.ResizeObserver) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [board]);
+  return metrics;
 }

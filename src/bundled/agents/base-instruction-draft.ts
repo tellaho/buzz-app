@@ -15,6 +15,29 @@ export type InstructionModuleState = {
   modified: boolean;
 };
 
+export const INSTRUCTION_CATEGORIES = [
+  "Core",
+  "Capabilities",
+  "Communication",
+  "Practice",
+  "Custom",
+  "Plugin",
+] as const;
+export type InstructionCategory = (typeof INSTRUCTION_CATEGORIES)[number];
+
+export type InstructionCategorySummary = {
+  category: InstructionCategory;
+  characters: number;
+  tokens: number;
+  percentage: number;
+};
+
+export type InstructionTileSpan = {
+  units: number;
+  columns: number;
+  rows: number;
+};
+
 export type MutableInstructionDraft = {
   composition: {
     modules: SavedModule[];
@@ -152,11 +175,10 @@ export function instructionDraftChanged(
   );
 }
 
-const groups: Record<string, string> = {
+const categories: Record<string, InstructionCategory> = {
   "buzz-identity": "Core",
   "incoming-turn": "Core",
   "buzz-cli": "Core",
-  projects: "Capabilities",
   "agent-creation": "Capabilities",
   workspace: "Capabilities",
   "agent-memory": "Capabilities",
@@ -169,7 +191,65 @@ const groups: Record<string, string> = {
   autonomy: "Practice",
 };
 
-export function instructionGroup(module: SavedModule) {
+export function instructionCategory(module: SavedModule): InstructionCategory {
   if (module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN) return "Custom";
-  return groups[module.key.slice(module.key.lastIndexOf("/") + 1)] ?? "Other";
+  if (module.pluginId !== DEFAULT_INSTRUCTIONS_PLUGIN) return "Plugin";
+  const known = categories[module.key.slice(module.key.lastIndexOf("/") + 1)];
+  if (known) return known;
+  return "Core";
+}
+
+export function estimateInstructionTokens(text: string) {
+  return Math.ceil(text.length / 4);
+}
+
+export function instructionPercentage(characters: number, total: number) {
+  return total > 0 ? (characters / total) * 100 : 0;
+}
+
+export function instructionCategorySummaries(
+  modules: readonly SavedModule[],
+): InstructionCategorySummary[] {
+  const total = modules.reduce((sum, module) => sum + module.text.length, 0);
+  const characters = new Map<InstructionCategory, number>();
+  for (const module of modules) {
+    const category = instructionCategory(module);
+    characters.set(
+      category,
+      (characters.get(category) ?? 0) + module.text.length,
+    );
+  }
+  return INSTRUCTION_CATEGORIES.flatMap((category) => {
+    const count = characters.get(category);
+    return count === undefined
+      ? []
+      : [
+          {
+            category,
+            characters: count,
+            tokens: Math.ceil(count / 4),
+            percentage: instructionPercentage(count, total),
+          },
+        ];
+  });
+}
+
+export function instructionBoardColumns(width: number) {
+  if (width >= 640) return 6;
+  if (width >= 440) return 4;
+  return 3;
+}
+
+export function instructionTileSpan(
+  characters: number,
+  total: number,
+  boardColumns: number,
+): InstructionTileSpan {
+  const targetCells = boardColumns * 5;
+  const units = Math.max(
+    1,
+    Math.round(instructionPercentage(characters, total) * targetCells * 0.01),
+  );
+  const columns = Math.min(boardColumns, Math.ceil(Math.sqrt(units)));
+  return { units, columns, rows: Math.ceil(units / columns) };
 }

@@ -38,14 +38,14 @@ async function openEditor(page, name = "Fixture agent") {
   return dialog;
 }
 
-async function traitStateColors(builder) {
+async function traitCategoryColors(builder) {
   return builder
-    .locator("li[data-trait-origin]")
-    .evaluateAll((rows) =>
+    .locator("[data-trait-category] > .base-prompt-category-swatch")
+    .evaluateAll((swatches) =>
       Object.fromEntries(
-        rows.map((row) => [
-          `${row.dataset.traitOrigin}:${Boolean(row.dataset.traitModified)}`,
-          getComputedStyle(row).backgroundColor,
+        swatches.map((swatch) => [
+          swatch.parentElement.dataset.traitCategory,
+          getComputedStyle(swatch).backgroundColor,
         ]),
       ),
     );
@@ -67,35 +67,42 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
     );
     await page.getByRole("tab", { name: "Base prompt", exact: true }).click();
     const builder = page.getByRole("region", { name: "Base prompt builder" });
-    const active = builder.getByRole("region", { name: "Your base prompt" });
-    const available = builder.getByRole("region", { name: "Available traits" });
+    const active = builder.getByRole("region", { name: "Base prompt traits" });
     await expect(active.getByText("3 active traits")).toBeVisible();
+    const [builderBox, activeBox] = await Promise.all([
+      builder.boundingBox(),
+      active.boundingBox(),
+    ]);
+    expect(activeBox.width).toBeGreaterThanOrEqual(builderBox.width - 1);
     await expect(
-      active.getByRole("img", { name: "Default trait", exact: true }),
+      active.getByRole("img", { name: "Core category", exact: true }),
     ).toBeVisible();
     await expect(
-      active.getByRole("img", { name: "Default trait, modified" }),
+      active.getByRole("img", { name: "Communication category, modified" }),
     ).toBeVisible();
     await expect(
-      active.getByRole("img", { name: "Plugin trait" }),
+      active.getByRole("img", { name: "Plugin category" }),
     ).toBeVisible();
+    await active.getByRole("button", { name: "Add trait" }).click();
+    let available = page.getByRole("dialog", { name: "Available traits" });
     await expect(
-      available.getByRole("img", { name: "Custom trait" }),
+      available.getByRole("img", { name: "Custom category" }),
     ).toBeVisible();
+    await page.keyboard.press("Escape");
 
-    const handle = active.getByRole("button", {
-      name: "Drag Buzz identity to reorder",
-    });
+    const tile = active
+      .getByRole("button", { name: "Buzz identity", exact: true })
+      .locator("xpath=ancestor::li");
     const target = active
       .getByRole("button", { name: "Threading", exact: true })
       .locator("xpath=ancestor::li");
-    const [handleBox, targetBox] = await Promise.all([
-      handle.boundingBox(),
+    const [tileBox, targetBox] = await Promise.all([
+      tile.boundingBox(),
       target.boundingBox(),
     ]);
     await page.mouse.move(
-      handleBox.x + handleBox.width / 2,
-      handleBox.y + handleBox.height / 2,
+      tileBox.x + tileBox.width / 2,
+      tileBox.y + tileBox.height / 2,
     );
     await page.mouse.down();
     await page.mouse.move(
@@ -119,7 +126,7 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
     await active
       .getByRole("button", { name: "Actions for Buzz identity" })
       .click();
-    await page.getByRole("menuitem", { name: "Move down" }).click();
+    await page.getByRole("menuitem", { name: "Move later" }).click();
     await active
       .getByRole("button", { name: "Threading", exact: true })
       .click();
@@ -133,6 +140,8 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
       .getByRole("button", { name: "Actions for Engineering discipline" })
       .click();
     await page.getByRole("menuitem", { name: "Remove" }).click();
+    await active.getByRole("button", { name: "Add trait" }).click();
+    available = page.getByRole("dialog", { name: "Available traits" });
     await expect(available.getByText("Engineering discipline")).toBeVisible();
     await available.getByRole("button", { name: "New trait" }).click();
     const create = page.getByRole("dialog", { name: "Create trait" });
@@ -147,34 +156,53 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
     await expect(builder.getByRole("status")).toContainText(
       "1 running agent needs restart",
     );
-    expect(
-      await page.evaluate(
-        () =>
-          window.agentControlFixture.calls.filter(
-            (call) => call.action === "adopt-instructions",
-          ).length,
+    const adoption = await page.evaluate(() =>
+      window.agentControlFixture.calls.filter(
+        (call) => call.action === "adopt-instructions",
       ),
-    ).toBe(1);
+    );
+    expect(adoption).toHaveLength(1);
+    expect(
+      adoption[0].payload.draft.composition.modules.map(
+        (module) => module.title,
+      ),
+    ).toEqual(["Threading", "Buzz identity", "Curiosity"]);
 
-    const stateColors = await traitStateColors(builder);
-    expect(new Set(Object.values(stateColors)).size).toBeGreaterThanOrEqual(4);
+    const categoryColors = await traitCategoryColors(builder);
+    expect(new Set(Object.values(categoryColors)).size).toBeGreaterThanOrEqual(
+      3,
+    );
 
     await page.setViewportSize({ width: 390, height: 900 });
-    const [activeBox, availableBox] = await Promise.all([
-      active.boundingBox(),
-      available.boundingBox(),
-    ]);
-    expect(availableBox.y).toBeGreaterThan(activeBox.y + activeBox.height - 1);
     await page.getByRole("button", { name: "Toggle appearance" }).click();
     await expect(page.locator("html")).toHaveAttribute(
       "data-color-mode",
       "dark",
     );
-    const darkStateColors = await traitStateColors(builder);
-    expect(new Set(Object.values(darkStateColors)).size).toBeGreaterThanOrEqual(
-      4,
+    await expect
+      .poll(() =>
+        active
+          .getByRole("list", { name: "Prompt traits in sequence" })
+          .evaluate((board) =>
+            getComputedStyle(board)
+              .getPropertyValue("--base-prompt-board-columns")
+              .trim(),
+          ),
+      )
+      .toBe("3");
+    const darkCategoryColors = await traitCategoryColors(builder);
+    expect(
+      new Set(Object.values(darkCategoryColors)).size,
+    ).toBeGreaterThanOrEqual(3);
+    expect(darkCategoryColors).not.toEqual(categoryColors);
+    await active.getByRole("button", { name: "Add trait" }).click();
+    const narrowAvailableBox = await page
+      .getByRole("dialog", { name: "Available traits" })
+      .boundingBox();
+    expect(narrowAvailableBox.x).toBeGreaterThanOrEqual(0);
+    expect(narrowAvailableBox.x + narrowAvailableBox.width).toBeLessThanOrEqual(
+      390,
     );
-    expect(darkStateColors).not.toEqual(stateColors);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,
