@@ -176,9 +176,7 @@ it("shows adoption only after native confirmation and leaves restart explicit", 
   fireEvent.click(screen.getByRole("button", { name: "Apply base prompt" }));
   try {
     await waitFor(() => expect(host.adoptInstructions).toHaveBeenCalledOnce());
-    expect(screen.getByRole("status").textContent).toContain(
-      "Saved revision 1",
-    );
+    expect(control.snapshot().data?.instructions?.revision).toBe(1);
     await waitFor(() =>
       expect(
         screen
@@ -190,12 +188,89 @@ it("shows adoption only after native confirmation and leaves restart explicit", 
     confirm(after);
   }
   await waitFor(() =>
-    expect(screen.getByRole("status").textContent).toContain(
-      "Saved revision 2",
-    ),
+    expect(control.snapshot().data?.instructions?.revision).toBe(2),
   );
+  expect(
+    screen.getByRole("button", { name: "Apply base prompt" }),
+  ).toBeDisabled();
   expect(host.adoptInstructions).toHaveBeenCalledWith(1, applied);
   expect(host.action).not.toHaveBeenCalled();
+  control.dispose();
+});
+
+it("presents compact base prompt metrics without exposing the saved revision", async () => {
+  const fixture = controlFixture();
+  const first = proposal.composition.modules[0];
+  if (!first) throw new Error("Expected fixture proposal");
+  const modules = Array.from({ length: 13 }, (_, index) => ({
+    ...first,
+    key: `fixture/metric-${index}`,
+    title: `Metric ${index + 1}`,
+    order: index * 10,
+    text: index === 0 ? "x".repeat(16_796) : "",
+  }));
+  const sourceProposal = {
+    composition: { ...proposal.composition, modules },
+    error: null,
+  };
+  const source: AgentInstructions = {
+    register() {},
+    snapshot: () => sourceProposal,
+    subscribe: () => () => {},
+  };
+  const saved = {
+    revision: 7,
+    composition: { ...proposal.composition, modules },
+    inactiveModules: [],
+  };
+  const outdated = {
+    ...structuredClone(fixture.agent),
+    id: "outdated",
+    runningInstructions: { revision: 6, sha256: "a".repeat(64) },
+  };
+  const current = {
+    ...structuredClone(fixture.agent),
+    id: "current",
+    runningInstructions: { revision: 7, sha256: "b".repeat(64) },
+  };
+  const notRunning = {
+    ...structuredClone(fixture.agent),
+    id: "not-running",
+    runningInstructions: null,
+  };
+  const control = createAgentControl({
+    ...fixture.host,
+    snapshot: async () => ({
+      agents: [outdated, current, notRunning],
+      runtimeAvailable: true,
+      instructions: saved,
+    }),
+    adoptInstructions: async () => ({
+      agents: [outdated, current, notRunning],
+      runtimeAvailable: true,
+      instructions: saved,
+    }),
+  });
+  await control.refresh();
+  function Harness() {
+    const state = useSyncExternalStore(control.subscribe, control.snapshot);
+    return (
+      <BaseInstructions instructions={source} control={control} state={state} />
+    );
+  }
+  render(<Harness />);
+
+  const summary = screen.getByRole("region", { name: "Base prompt summary" });
+  expect(within(summary).getByText("Active traits")).toBeVisible();
+  expect(within(summary).getByText("13")).toBeVisible();
+  expect(within(summary).getByText("Estimated tokens")).toBeVisible();
+  expect(within(summary).getByText("~4.2K")).toBeVisible();
+  expect(within(summary).getByText("Approximately 4,199 tokens")).toHaveClass(
+    "sr-only",
+  );
+  expect(within(summary).getByText("Running agents to restart")).toBeVisible();
+  expect(within(summary).getByText("1")).toBeVisible();
+  expect(summary).not.toHaveTextContent(/Saved revision/i);
   control.dispose();
 });
 

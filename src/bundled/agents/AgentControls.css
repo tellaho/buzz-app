@@ -26,6 +26,40 @@
   justify-content: space-between;
   gap: var(--space-4);
 }
+.base-prompt-toolbar {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.base-prompt-metrics {
+  min-width: 0;
+  flex: 1;
+}
+.base-prompt-metrics-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+.base-prompt-metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0 var(--space-4);
+}
+.base-prompt-metric:first-child {
+  padding-left: 0;
+}
+.base-prompt-metric + .base-prompt-metric {
+  border-left: 1px solid var(--border-standard);
+}
+.base-prompt-metric-value {
+  order: -1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.base-prompt-add-trait {
+  flex: none;
+}
 .base-prompt-stack {
   display: flex;
   min-width: 0;
@@ -248,6 +282,12 @@
 }
 
 @media (max-width: 520px) {
+  .base-prompt-metrics {
+    flex-basis: 100%;
+  }
+  .base-prompt-add-trait {
+    margin-left: auto;
+  }
   .base-prompt-available-trait {
     align-items: stretch;
     flex-wrap: wrap;

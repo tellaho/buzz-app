@@ -164,6 +164,7 @@ function BaseInstructionBuilder({
   const prompt = draft.composition.modules
     .map((module) => module.text)
     .join("");
+  const estimatedTokens = estimateInstructionTokens(prompt);
   const categorySummaries = instructionCategorySummaries(
     draft.composition.modules,
   );
@@ -366,23 +367,58 @@ function BaseInstructionBuilder({
 
       <section className="base-prompt-stack" aria-label="Base prompt traits">
         <div className="base-prompt-toolbar">
-          <p className="m-0 text-body-sm text-secondary" role="status">
-            {draft.composition.modules.length} active traits · approximately{" "}
-            {estimateInstructionTokens(prompt).toLocaleString()} tokens · Saved
-            revision {saved.revision} · {pending} running{" "}
-            {pending === 1 ? "agent needs" : "agents need"} restart
-          </p>
+          <section
+            className="base-prompt-metrics"
+            aria-labelledby="base-prompt-summary-title"
+          >
+            <h2 id="base-prompt-summary-title" className="sr-only">
+              Base prompt summary
+            </h2>
+            <dl className="base-prompt-metrics-list">
+              <div className="base-prompt-metric">
+                <dt className="m-0 text-body-sm text-secondary">
+                  Active traits
+                </dt>
+                <dd className="base-prompt-metric-value m-0 text-title">
+                  {draft.composition.modules.length}
+                </dd>
+              </div>
+              <div className="base-prompt-metric">
+                <dt className="m-0 text-body-sm text-secondary">
+                  Estimated tokens
+                </dt>
+                <dd className="base-prompt-metric-value m-0 text-title">
+                  <span aria-hidden="true">
+                    ~{formatCompactInstructionTokens(estimatedTokens)}
+                  </span>
+                  <span className="sr-only">
+                    Approximately {estimatedTokens.toLocaleString()} tokens
+                  </span>
+                </dd>
+              </div>
+              <div className="base-prompt-metric">
+                <dt className="m-0 text-body-sm text-secondary">
+                  Running agents to restart
+                </dt>
+                <dd className="base-prompt-metric-value m-0 text-title">
+                  {pending}
+                </dd>
+              </div>
+            </dl>
+          </section>
           <PopoverRoot open={availableOpen} onOpenChange={setAvailableOpen}>
-            <PopoverTrigger
-              render={
-                <IconButton
-                  size="compact"
-                  aria-label="Add trait"
-                  title="Add trait"
-                  icon={<PlusIcon size={16} aria-hidden="true" />}
-                />
-              }
-            />
+            <div className="base-prompt-add-trait">
+              <PopoverTrigger
+                render={
+                  <IconButton
+                    size="compact"
+                    aria-label="Add trait"
+                    title="Add trait"
+                    icon={<PlusIcon size={16} aria-hidden="true" />}
+                  />
+                }
+              />
+            </div>
             <PopoverPopup align="end" size="wide">
               <div className="base-prompt-library-menu">
                 <div>
@@ -1009,6 +1045,13 @@ function categoryKey(category: InstructionCategory) {
 function formatInstructionPercentage(percentage: number) {
   if (percentage > 0 && percentage < 1) return "<1%";
   return `${Math.round(percentage)}%`;
+}
+
+function formatCompactInstructionTokens(tokens: number) {
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(tokens);
 }
 
 function useInstructionBoard(board: RefObject<HTMLOListElement | null>) {
