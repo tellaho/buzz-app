@@ -637,13 +637,36 @@ it("shows compact origin and modification states in both trait lists", async () 
     }),
   ).toBeTruthy();
 
+  await user.keyboard("{Escape}");
+  await user.click(screen.getByRole("button", { name: "Default behavior" }));
+  expect(
+    screen.getByRole("dialog", { name: "Edit Default behavior" }),
+  ).toHaveAttribute("data-base-prompt-editor", "");
+  expect(screen.getByText("Default trait · Buzz defaults")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Trait name"), {
+    target: { value: "Edited default" },
+  });
+  const reset = screen.getByRole("button", { name: "Reset to default" });
+  expect(
+    screen.getByLabelText("Instructions").closest(".buzz-field"),
+  ).toContainElement(reset);
+  await user.click(reset);
+  expect(screen.getByLabelText("Trait name")).toHaveValue("Default behavior");
+  expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  await user.click(screen.getByRole("button", { name: "Add trait" }));
+  availableMenu = await screen.findByRole("dialog", {
+    name: "Available traits",
+  });
+
   await user.click(
     within(availableMenu).getByRole("button", { name: "Custom behavior" }),
   );
   expect(
     screen.getByRole("dialog", { name: "Edit Custom behavior" }),
   ).toBeTruthy();
-  expect(screen.getByText("Created in this app profile.")).toBeTruthy();
+  expect(screen.getByText("Custom trait · This app profile")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "Save trait" }));
   availableMenu = await screen.findByRole("dialog", {
     name: "Available traits",
@@ -657,11 +680,7 @@ it("shows compact origin and modification states in both trait lists", async () 
       name: "Unavailable behavior",
     }),
   );
-  expect(
-    screen.getByText(
-      "Source: fixture. The saved source revision is unavailable.",
-    ),
-  ).toBeTruthy();
+  expect(screen.getByText("Plugin trait · fixture")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "Cancel" }));
   availableMenu = await screen.findByRole("dialog", {
     name: "Available traits",
@@ -674,15 +693,10 @@ it("shows compact origin and modification states in both trait lists", async () 
   await user.keyboard("{Escape}");
 
   await user.click(screen.getByRole("button", { name: "Plugin behavior" }));
-  expect(screen.getByText("Modified Plugin trait")).toBeTruthy();
-  expect(
-    screen.getByText("Source: fixture. Differs from the current source."),
-  ).toBeTruthy();
+  expect(screen.getByText("Plugin trait · fixture")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "Reset to default" }));
-  expect(screen.getByText("Plugin trait", { exact: true })).toBeTruthy();
-  expect(
-    screen.getByText("Source: fixture. Matches the current source."),
-  ).toBeTruthy();
+  expect(screen.getByText("Plugin trait · fixture")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull();
   await user.click(screen.getByRole("button", { name: "Save trait" }));
   expect(modifiedPluginRow).not.toHaveAttribute("data-trait-modified");
   control.dispose();

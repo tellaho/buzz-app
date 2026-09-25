@@ -70,6 +70,12 @@
   .buzz-textarea[data-variant="code"] {
     @apply text-mono;
   }
+  .buzz-input[data-text-size="large"] {
+    @apply text-label;
+  }
+  .buzz-textarea[data-text-size="large"] {
+    @apply text-body;
+  }
   .buzz-input::placeholder,
   .buzz-textarea::placeholder {
     color: var(--text-metadata);

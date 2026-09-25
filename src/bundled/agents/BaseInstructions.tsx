@@ -187,6 +187,12 @@ function BaseInstructionBuilder({
   const editorSource = editor
     ? sourceModule(editor.module.key, proposal)
     : undefined;
+  const editorDiffersFromSource =
+    editor !== null &&
+    editorSource !== undefined &&
+    (editor.title !== editorSource.title ||
+      instructionEditorText(editor.text) !==
+        instructionEditorText(editorSource.text));
 
   const mutate = (
     update: (current: MutableInstructionDraft) => MutableInstructionDraft,
@@ -462,6 +468,7 @@ function BaseInstructionBuilder({
           <Input
             ref={editorName}
             autoFocus
+            textSize="large"
             value={editor.title}
             onChange={(event) => {
               setEditor({ ...editor, title: event.currentTarget.value });
@@ -470,42 +477,47 @@ function BaseInstructionBuilder({
           />
         </Field>
         <Field label="Instructions">
-          <Textarea
-            variant="code"
-            rows={18}
-            value={
-              editor.dirty ? editor.text : instructionEditorText(editor.text)
-            }
-            onChange={(event) =>
-              setEditor({
-                ...editor,
-                text: event.currentTarget.value,
-                dirty: true,
-              })
-            }
-          />
+          <div className="base-prompt-editor-instructions">
+            <Textarea
+              variant="code"
+              textSize="large"
+              rows={18}
+              value={
+                editor.dirty ? editor.text : instructionEditorText(editor.text)
+              }
+              onChange={(event) =>
+                setEditor({
+                  ...editor,
+                  text: event.currentTarget.value,
+                  dirty: true,
+                })
+              }
+            />
+            {editorSource && editorDiffersFromSource && (
+              <button
+                type="button"
+                className="base-prompt-editor-reset text-caption"
+                onClick={() => {
+                  setEditor({
+                    ...editor,
+                    module: {
+                      ...editorSource,
+                      order: editor.module.order,
+                    },
+                    title: editorSource.title,
+                    text: editorSource.text,
+                    dirty: false,
+                  });
+                  setEditorError(null);
+                }}
+              >
+                Reset to default
+              </button>
+            )}
+          </div>
         </Field>
       </div>
       <footer className="base-prompt-editor-actions">
-        {editorSource && (
-          <Button
-            onClick={() => {
-              setEditor({
-                ...editor,
-                module: {
-                  ...editorSource,
-                  order: editor.module.order,
-                },
-                title: editorSource.title,
-                text: editorSource.text,
-                dirty: false,
-              });
-              setEditorError(null);
-            }}
-          >
-            Reset to default
-          </Button>
-        )}
         <Button
           onClick={() => {
             if (editor.location === "active") setEditor(null);
@@ -715,6 +727,7 @@ function BaseInstructionBuilder({
                   />
                   {editorOpen && (
                     <PopoverPopup
+                      data-base-prompt-editor=""
                       side={editor.side}
                       align="start"
                       size="wide"
@@ -862,6 +875,9 @@ function BaseInstructionBuilder({
                 }
               />
               <PopoverPopup
+                data-base-prompt-editor={
+                  editor && editor.location !== "active" ? "" : undefined
+                }
                 side="left"
                 align="end"
                 size="wide"
@@ -1151,25 +1167,12 @@ function TraitStateDetails({
   proposal: ReturnType<AgentInstructions["snapshot"]>;
 }) {
   const state = instructionModuleState(module, proposal);
-  const category = instructionCategory(module);
-  const title = `${state.modified ? "Modified " : ""}${originLabel(state.origin)}`;
-  const detail =
+  const title = originLabel(state.origin);
+  const hint =
     state.origin === "custom"
-      ? "Created in this app profile."
-      : state.source === "unavailable"
-        ? `${sourceLabel(module)} The saved source revision is unavailable.`
-        : state.modified
-          ? `${sourceLabel(module)} Differs from the current source.`
-          : `${sourceLabel(module)} Matches the current source.`;
-  return (
-    <div className="base-prompt-trait-details">
-      <TraitCategoryIcon category={category} state={state} />
-      <div className="min-w-0">
-        <p className="m-0 text-label">{title}</p>
-        <p className="m-0 text-body-sm text-secondary">{detail}</p>
-      </div>
-    </div>
-  );
+      ? `${title} · This app profile`
+      : `${title} · ${sourceLabel(module)}`;
+  return <p className="m-0 text-body-sm text-secondary">{hint}</p>;
 }
 
 function originLabel(origin: InstructionModuleState["origin"]) {
@@ -1180,8 +1183,8 @@ function originLabel(origin: InstructionModuleState["origin"]) {
 
 function sourceLabel(module: SavedModule) {
   return module.pluginId === DEFAULT_INSTRUCTIONS_PLUGIN
-    ? "Source: Buzz defaults."
-    : `Source: ${module.pluginId}.`;
+    ? "Buzz defaults"
+    : module.pluginId;
 }
 
 function categoryKey(category: InstructionCategory) {

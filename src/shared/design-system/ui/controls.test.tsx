@@ -137,6 +137,22 @@ test("fields connect labels, help and errors and keep textarea edits controlled"
   expect(screen.getByRole("status")).toHaveTextContent("Draft notes");
 });
 
+test("inputs can opt into larger text without changing control geometry", () => {
+  render(
+    <>
+      <Input aria-label="Large input" textSize="large" />
+      <Textarea aria-label="Large textarea" textSize="large" />
+    </>,
+  );
+  expect(screen.getByRole("textbox", { name: "Large input" })).toHaveAttribute(
+    "data-text-size",
+    "large",
+  );
+  expect(
+    screen.getByRole("textbox", { name: "Large textarea" }),
+  ).toHaveAttribute("data-text-size", "large");
+});
+
 test("radio and checkbox labels change the actual form values while disabled choices do not", async () => {
   const user = userEvent.setup();
   render(
