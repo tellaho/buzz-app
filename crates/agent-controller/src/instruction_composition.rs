@@ -16,7 +16,16 @@ pub struct InstructionModule {
     pub plugin_id: String,
     pub revision: String,
     pub order: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
     pub text: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InstructionCategory {
+    pub id: String,
+    pub title: String,
+    pub tone: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -28,6 +37,8 @@ pub struct InstructionPlugin {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InstructionComposition {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<InstructionCategory>,
     pub modules: Vec<InstructionModule>,
     pub plugins: Vec<InstructionPlugin>,
 }
@@ -45,18 +56,35 @@ impl InstructionComposition {
             }
         }
         let mut keys = BTreeSet::new();
+        let mut categories = BTreeSet::new();
+        for category in &self.categories {
+            identifier(&category.id)?;
+            heading(&category.title)?;
+            if !valid_tone(&category.tone) || !categories.insert(category.id.as_str()) {
+                return Err("Invalid or duplicate instruction category".into());
+            }
+        }
         let mut bytes = 0;
         let mut previous = None;
         for module in &self.modules {
             identifier(&module.plugin_id)?;
             label(&module.key, 256)?;
-            label(&module.title, 256)?;
+            heading(&module.title)?;
             label(&module.revision, 256)?;
             if !module.key.starts_with(&format!("{}/", module.plugin_id))
                 || !keys.insert(&module.key)
                 || module.text.contains('\0')
             {
                 return Err("Invalid or duplicate instruction module".into());
+            }
+            if !self.categories.is_empty()
+                && (!module
+                    .category
+                    .as_deref()
+                    .is_some_and(|category| categories.contains(category))
+                    || !valid_instruction_body(&module.text))
+            {
+                return Err("Invalid categorized instruction entry".into());
             }
             let sort_key = (module.order, module.key.as_str());
             if previous.is_some_and(|prior| prior >= sort_key) {
@@ -81,7 +109,35 @@ impl InstructionComposition {
         Ok(())
     }
     pub fn text(&self) -> String {
-        self.modules.iter().map(|m| m.text.as_str()).collect()
+        if self.categories.is_empty() {
+            return self.modules.iter().map(|m| m.text.as_str()).collect();
+        }
+        let mut sections = Vec::new();
+        for category in &self.categories {
+            let modules = self
+                .modules
+                .iter()
+                .filter(|module| module.category.as_deref() == Some(category.id.as_str()))
+                .collect::<Vec<_>>();
+            if modules.is_empty() {
+                continue;
+            }
+            let mut entries = vec![format!("## {}", category.title.trim())];
+            entries.extend(modules.into_iter().map(|module| {
+                let body = module.text.trim();
+                if body.is_empty() {
+                    format!("### {}", module.title.trim())
+                } else {
+                    format!("### {}\n\n{body}", module.title.trim())
+                }
+            }));
+            sections.push(entries.join("\n\n"));
+        }
+        if sections.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", sections.join("\n\n"))
+        }
     }
     pub(crate) fn hash(&self) -> String {
         format!("{:x}", Sha256::digest(self.text().as_bytes()))
@@ -115,6 +171,16 @@ impl InstructionDraft {
             .sum::<usize>();
         for module in &self.inactive_modules {
             validate_module(module)?;
+            if !self.composition.categories.is_empty()
+                && !module.category.as_deref().is_some_and(|category| {
+                    self.composition
+                        .categories
+                        .iter()
+                        .any(|candidate| candidate.id == category)
+                })
+            {
+                return Err("Inactive instruction entry has no category".into());
+            }
             if !keys.insert(&module.key) {
                 return Err("Instruction traits must have unique identities".into());
             }
@@ -148,7 +214,11 @@ impl SavedInstructions {
         let modules = split_source(BASE, &plugins).expect("embedded base prompt sections");
         Self {
             revision: 1,
-            composition: InstructionComposition { modules, plugins },
+            composition: InstructionComposition {
+                categories: default_categories(),
+                modules,
+                plugins,
+            },
             inactive_modules: Vec::new(),
         }
     }
@@ -195,10 +265,18 @@ fn label(value: &str, limit: usize) -> Result<()> {
     Ok(())
 }
 
+fn heading(value: &str) -> Result<()> {
+    label(value, 256)?;
+    if value.contains(['\r', '\n']) {
+        return Err("Instruction headings must be single lines".into());
+    }
+    Ok(())
+}
+
 fn validate_module(module: &InstructionModule) -> Result<()> {
     identifier(&module.plugin_id)?;
     label(&module.key, 256)?;
-    label(&module.title, 256)?;
+    heading(&module.title)?;
     label(&module.revision, 256)?;
     if !module.key.starts_with(&format!("{}/", module.plugin_id)) || module.text.contains('\0') {
         return Err("Invalid instruction trait".into());
@@ -206,11 +284,97 @@ fn validate_module(module: &InstructionModule) -> Result<()> {
     Ok(())
 }
 
+fn valid_tone(value: &str) -> bool {
+    matches!(
+        value,
+        "slate"
+            | "red"
+            | "orange"
+            | "amber"
+            | "lime"
+            | "green"
+            | "teal"
+            | "cyan"
+            | "blue"
+            | "indigo"
+            | "purple"
+            | "pink"
+    )
+}
+
+fn valid_instruction_body(text: &str) -> bool {
+    let mut fence = None;
+    let mut previous_text = false;
+    for line in text.lines() {
+        let content = line.trim_start_matches(' ');
+        if line.len() - content.len() > 3 {
+            continue;
+        }
+        let marker = if content.starts_with("```") {
+            Some('`')
+        } else if content.starts_with("~~~") {
+            Some('~')
+        } else {
+            None
+        };
+        if let Some(marker) = marker {
+            if fence == Some(marker) {
+                fence = None;
+            } else if fence.is_none() {
+                fence = Some(marker);
+            }
+            previous_text = false;
+            continue;
+        }
+        if fence.is_none() {
+            let hashes = content.bytes().take_while(|byte| *byte == b'#').count();
+            if (1..=3).contains(&hashes)
+                && content
+                    .as_bytes()
+                    .get(hashes)
+                    .is_none_or(|byte| byte.is_ascii_whitespace())
+            {
+                return false;
+            }
+            let underline = content.trim_end();
+            if previous_text
+                && !underline.is_empty()
+                && (underline.bytes().all(|byte| byte == b'=')
+                    || underline.bytes().all(|byte| byte == b'-'))
+            {
+                return false;
+            }
+            previous_text = !content.trim().is_empty();
+        }
+    }
+    true
+}
+
+fn default_categories() -> Vec<InstructionCategory> {
+    [
+        ("core", "Core", "purple"),
+        ("capabilities", "Capabilities", "blue"),
+        ("communication", "Communication Patterns", "green"),
+        ("practice", "Practice", "orange"),
+        ("custom", "Custom", "amber"),
+        ("plugins", "Plugins", "cyan"),
+        ("uncategorized", "Uncategorized", "slate"),
+    ]
+    .into_iter()
+    .map(|(id, title, tone)| InstructionCategory {
+        id: id.into(),
+        title: title.into(),
+        tone: tone.into(),
+    })
+    .collect()
+}
+
 struct Section {
     plugin: &'static str,
     id: &'static str,
     title: &'static str,
     order: i32,
+    category: &'static str,
     marker: Option<&'static str>,
 }
 
@@ -220,6 +384,7 @@ const SECTIONS: &[Section] = &[
         id: "buzz-identity",
         title: "Buzz identity",
         order: 0,
+        category: "core",
         marker: None,
     },
     Section {
@@ -227,6 +392,7 @@ const SECTIONS: &[Section] = &[
         id: "incoming-turn",
         title: "Incoming turn contract",
         order: 10,
+        category: "core",
         marker: Some("## Incoming Turn Contract"),
     },
     Section {
@@ -234,6 +400,7 @@ const SECTIONS: &[Section] = &[
         id: "buzz-cli",
         title: "Buzz CLI",
         order: 20,
+        category: "core",
         marker: Some("## Buzz CLI"),
     },
     Section {
@@ -241,6 +408,7 @@ const SECTIONS: &[Section] = &[
         id: "projects",
         title: "Projects",
         order: 30,
+        category: "plugins",
         marker: Some("## Projects"),
     },
     Section {
@@ -248,6 +416,7 @@ const SECTIONS: &[Section] = &[
         id: "agent-creation",
         title: "Agent creation",
         order: 40,
+        category: "capabilities",
         marker: Some("## Conversational Agent Creation"),
     },
     Section {
@@ -255,6 +424,7 @@ const SECTIONS: &[Section] = &[
         id: "mentions",
         title: "Mentions",
         order: 50,
+        category: "communication",
         marker: Some("## Communication Patterns\n\n### Mentions"),
     },
     Section {
@@ -262,6 +432,7 @@ const SECTIONS: &[Section] = &[
         id: "callback-mentions",
         title: "Callback mentions",
         order: 60,
+        category: "communication",
         marker: Some("### Callback Mentions"),
     },
     Section {
@@ -269,6 +440,7 @@ const SECTIONS: &[Section] = &[
         id: "threading",
         title: "Threading",
         order: 70,
+        category: "communication",
         marker: Some("### Threading"),
     },
     Section {
@@ -276,6 +448,7 @@ const SECTIONS: &[Section] = &[
         id: "general-communication",
         title: "General communication",
         order: 80,
+        category: "communication",
         marker: Some("### General"),
     },
     Section {
@@ -283,6 +456,7 @@ const SECTIONS: &[Section] = &[
         id: "workspace",
         title: "Workspace",
         order: 90,
+        category: "capabilities",
         marker: Some("## Workspace Layout"),
     },
     Section {
@@ -290,6 +464,7 @@ const SECTIONS: &[Section] = &[
         id: "agent-memory",
         title: "Agent memory",
         order: 100,
+        category: "capabilities",
         marker: Some("## Agent Memory"),
     },
     Section {
@@ -297,6 +472,7 @@ const SECTIONS: &[Section] = &[
         id: "engineering-discipline",
         title: "Engineering discipline",
         order: 110,
+        category: "practice",
         marker: Some("## Engineering Discipline"),
     },
     Section {
@@ -304,6 +480,7 @@ const SECTIONS: &[Section] = &[
         id: "repository-workflow",
         title: "Repository workflow",
         order: 120,
+        category: "practice",
         marker: Some("## Working in the Repo"),
     },
     Section {
@@ -311,6 +488,7 @@ const SECTIONS: &[Section] = &[
         id: "autonomy",
         title: "Autonomy",
         order: 130,
+        category: "practice",
         marker: Some("## Autonomy"),
     },
 ];
@@ -342,16 +520,54 @@ fn split_source(text: &str, plugins: &[InstructionPlugin]) -> Result<Vec<Instruc
             plugin_id: section.plugin.into(),
             revision,
             order: section.order,
-            text: text[*start..end].into(),
+            category: Some(section.category.into()),
+            text: instruction_body(&text[*start..end]),
         });
     }
-    if modules
+    Ok(modules)
+}
+
+fn instruction_body(text: &str) -> String {
+    let lines = text.lines().collect::<Vec<_>>();
+    let mut index = 0;
+    while lines.get(index).is_some_and(|line| line.trim().is_empty()) {
+        index += 1;
+    }
+    while lines.get(index).is_some_and(|line| {
+        let line = line.trim();
+        let hashes = line.bytes().take_while(|byte| *byte == b'#').count();
+        (1..=3).contains(&hashes)
+            && line
+                .as_bytes()
+                .get(hashes)
+                .is_some_and(|byte| byte.is_ascii_whitespace())
+    }) {
+        index += 1;
+        while lines.get(index).is_some_and(|line| line.trim().is_empty()) {
+            index += 1;
+        }
+    }
+    lines[index..].join("\n").trim_end().into()
+}
+
+fn split_legacy_source(
+    text: &str,
+    plugins: &[InstructionPlugin],
+) -> Result<Vec<InstructionModule>> {
+    let mut modules = split_source(text, plugins)?;
+    let mut found = SECTIONS
         .iter()
-        .map(|module| module.text.as_str())
-        .collect::<String>()
-        != text
-    {
-        return Err("Base prompt sections did not preserve the source bytes".into());
+        .filter_map(|section| {
+            let start = section.marker.map_or(Some(0), |marker| text.find(marker))?;
+            Some(start)
+        })
+        .collect::<Vec<_>>();
+    found.sort_unstable();
+    for (index, module) in modules.iter_mut().enumerate() {
+        let start = found[index];
+        let end = found.get(index + 1).copied().unwrap_or(text.len());
+        module.category = None;
+        module.text = text[start..end].into();
     }
     Ok(modules)
 }
@@ -374,6 +590,74 @@ pub(crate) fn migrate_legacy_modules(saved: &mut SavedInstructions) -> Result<bo
         return Ok(false);
     }
     let text = saved.composition.text();
-    saved.composition.modules = split_source(&text, &saved.composition.plugins)?;
+    saved.composition.modules = split_legacy_source(&text, &saved.composition.plugins)?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn structured(body: &str) -> InstructionComposition {
+        InstructionComposition {
+            categories: vec![
+                InstructionCategory {
+                    id: "first".into(),
+                    title: "First category".into(),
+                    tone: "purple".into(),
+                },
+                InstructionCategory {
+                    id: "empty".into(),
+                    title: "Empty category".into(),
+                    tone: "slate".into(),
+                },
+            ],
+            modules: vec![InstructionModule {
+                key: "fixture/entry".into(),
+                title: "An entry".into(),
+                plugin_id: "fixture".into(),
+                revision: "v1".into(),
+                order: 0,
+                category: Some("first".into()),
+                text: body.into(),
+            }],
+            plugins: vec![InstructionPlugin {
+                id: "fixture".into(),
+                revision: "v1".into(),
+                enabled: true,
+            }],
+        }
+    }
+
+    #[test]
+    fn categorized_text_generates_headings_and_omits_empty_categories() {
+        let composition = structured("Body Markdown.\n");
+        assert_eq!(
+            composition.text(),
+            "## First category\n\n### An entry\n\nBody Markdown.\n"
+        );
+        composition.validate().unwrap();
+    }
+
+    #[test]
+    fn baseline_places_projects_with_plugin_instructions() {
+        let saved = SavedInstructions::baseline();
+        let projects = saved
+            .composition
+            .modules
+            .iter()
+            .find(|module| module.key == "buzz.projects/projects")
+            .expect("Projects instructions");
+        assert_eq!(projects.category.as_deref(), Some("plugins"));
+    }
+
+    #[test]
+    fn categorized_entries_reject_h1_through_h3_outside_fences() {
+        for heading in ["# One", "## Two", "### Three"] {
+            assert!(structured(heading).validate().is_err());
+        }
+        assert!(structured("Setext heading\n---").validate().is_err());
+        structured("```md\n## Example\n```").validate().unwrap();
+        structured("#### Body subheading").validate().unwrap();
+    }
 }

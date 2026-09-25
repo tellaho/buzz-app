@@ -1,14 +1,14 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { Context } from "@deepseek-ai/cordis";
-import { readFileSync } from "node:fs";
 import { createPluginManager, type BundledPlugin } from "../../plugins/manager";
-import { AgentInstructionsService } from "./service";
+import { AgentInstructionsService, validInstructionBody } from "./service";
 import { PagesService } from "../pages/service";
 import { provideNavigation } from "../navigation/service";
 import { provideRelay } from "../relay/service";
 import * as base from "../../bundled/agent-instructions";
 import * as projects from "../../bundled/projects";
 import type { StorageResult } from "../../plugins/types";
+import { instructionPrompt } from "../../bundled/agents/base-instruction-draft";
 
 const bundled: BundledPlugin[] = [
   {
@@ -79,19 +79,19 @@ function setup(extra: BundledPlugin[] = []) {
   });
   return { service, manager, pages };
 }
-it("composes the exact carryover and removes/restores Projects with plugin lifecycle", async () => {
+it("accepts heading examples in fences but rejects body H1 through H3", () => {
+  expect(validInstructionBody("```md\n## Example\n```")).toBe(true);
+  expect(validInstructionBody("#### Body detail")).toBe(true);
+  expect(validInstructionBody("## Generated-level heading")).toBe(false);
+  expect(validInstructionBody("Generated-level heading\n---")).toBe(false);
+});
+it("publishes body-only categorized entries and removes/restores Projects with plugin lifecycle", async () => {
   const { service, manager, pages } = setup();
   await vi.waitFor(() => expect(service.snapshot().error).toBeNull());
-  const baseline = readFileSync(
-    "crates/agent-controller/instructions/base.md",
-    "utf8",
-  );
-  expect(
-    service
-      .snapshot()
-      .composition.modules.map((m) => m.text)
-      .join(""),
-  ).toBe(baseline);
+  const initial = service.snapshot().composition;
+  const baseline = instructionPrompt(initial.categories ?? [], initial.modules);
+  expect(baseline).toContain("## Communication Patterns\n\n### Mentions\n\n");
+  expect(baseline).toContain("## Plugins\n\n### Projects\n\n");
   const projectPage = () =>
     pages.snapshot().find((page) => page.pluginId === "buzz.projects");
   expect(projectPage()).toMatchObject({
@@ -105,12 +105,9 @@ it("composes the exact carryover and removes/restores Projects with plugin lifec
     expect(service.snapshot().composition.modules).toHaveLength(13);
     expect(projectPage()).toBeUndefined();
   });
-  expect(
-    service
-      .snapshot()
-      .composition.modules.map((m) => m.text)
-      .join(""),
-  ).not.toContain("## Projects\n");
+  expect(service.snapshot().composition.modules).not.toContainEqual(
+    expect.objectContaining({ key: "buzz.projects/projects" }),
+  );
   expect(
     service.snapshot().composition.plugins.find((p) => p.id === "buzz.projects")
       ?.enabled,
@@ -125,10 +122,10 @@ it("composes the exact carryover and removes/restores Projects with plugin lifec
     route: { version: 1 },
   });
   expect(
-    service
-      .snapshot()
-      .composition.modules.map((m) => m.text)
-      .join(""),
+    instructionPrompt(
+      service.snapshot().composition.categories ?? [],
+      service.snapshot().composition.modules,
+    ),
   ).toBe(baseline);
 });
 it("blocks adoption while an enabled plugin fails rather than omitting its instructions silently", async () => {

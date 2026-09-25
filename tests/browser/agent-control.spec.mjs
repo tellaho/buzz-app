@@ -40,12 +40,12 @@ async function openEditor(page, name = "Fixture agent") {
 
 async function traitCategoryColors(builder) {
   return builder
-    .locator("[data-trait-category] > .base-prompt-category-swatch")
-    .evaluateAll((swatches) =>
+    .locator("[data-trait-key][data-category-tone]")
+    .evaluateAll((cards) =>
       Object.fromEntries(
-        swatches.map((swatch) => [
-          swatch.parentElement.dataset.traitCategory,
-          getComputedStyle(swatch).backgroundColor,
+        cards.map((card) => [
+          card.dataset.categoryTone,
+          getComputedStyle(card).backgroundColor,
         ]),
       ),
     );
@@ -77,14 +77,64 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
     ]);
     expect(activeBox.width).toBeGreaterThanOrEqual(builderBox.width - 1);
     await expect(
-      active.getByRole("img", { name: "Core category", exact: true }),
+      active.getByLabel("Category heading for Core", { exact: true }),
     ).toBeVisible();
     await expect(
-      active.getByRole("img", { name: "Communication category, modified" }),
+      active.getByLabel("Category heading for Communication Patterns", {
+        exact: true,
+      }),
     ).toBeVisible();
     await expect(
-      active.getByRole("img", { name: "Plugin category" }),
+      builder.getByRole("button", { name: "Reset all to default" }),
     ).toBeVisible();
+    await expect(
+      builder.getByRole("button", { name: "Apply base prompt" }),
+    ).toHaveCount(0);
+    await expect(
+      active.getByRole("button", { name: "Add category", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      active.getByRole("button", { name: "Add trait", exact: true }),
+    ).toHaveCount(0);
+    await active
+      .getByRole("button", { name: "Add to Core", exact: true })
+      .click();
+    await expect(
+      page.getByRole("menuitem", { name: "Add trait" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("menuitem", { name: "Add category" }),
+    ).toBeVisible();
+    await page.getByRole("menuitem", { name: "Add trait" }).click();
+    const createTrait = page.getByRole("dialog", { name: "Create trait" });
+    await expect(createTrait).toBeVisible();
+    await createTrait.getByRole("button", { name: "Close" }).click();
+    const largeCard = active
+      .getByRole("button", { name: "Buzz identity", exact: true })
+      .locator("xpath=ancestor::li");
+    await expect(largeCard).toHaveCSS("grid-column-start", "span 1");
+    await expect(largeCard).toHaveCSS("grid-row-start", "span 2");
+    const [sectionCardBox, sectionHeadingBox] = await Promise.all([
+      largeCard.boundingBox(),
+      active
+        .getByLabel("Category heading for Core", { exact: true })
+        .locator("xpath=ancestor::li")
+        .boundingBox(),
+    ]);
+    expect(sectionHeadingBox.height).toBeLessThan(sectionCardBox.height * 0.6);
+    const emptyCategoryBox = await active
+      .getByLabel("Capabilities is empty", { exact: true })
+      .boundingBox();
+    expect(emptyCategoryBox.width).toBeGreaterThan(sectionCardBox.width * 0.9);
+    expect(emptyCategoryBox.height).toBeGreaterThan(
+      sectionHeadingBox.height * 1.5,
+    );
+    await builder.getByRole("tab", { name: "All entries" }).click();
+    await expect(
+      active.getByLabel("Category heading for Core", { exact: true }),
+    ).toHaveCount(0);
+    await expect(largeCard).toHaveCSS("grid-column-start", "span 2");
+    await expect(largeCard).toHaveCSS("grid-row-start", "span 2");
     // Browser-only: CSS grid geometry and Base UI's computed collision side are
     // layout contracts that a DOM emulator cannot establish.
     const board = active.getByRole("list", {
@@ -176,29 +226,30 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
         "opacity",
         "1",
       );
-      await expect(board.locator("li:not([data-selected])").first()).toHaveCSS(
-        "opacity",
-        "0.35",
-      );
+      await expect(
+        board.locator("[data-trait-key]:not([data-selected])").first(),
+      ).toHaveCSS("opacity", "0.35");
       await traitEditor.getByRole("button", { name: "Cancel" }).click();
       await expect(trigger).toBeFocused();
       await expect(board.locator("li").first()).toHaveCSS("opacity", "1");
     }
 
     await active.getByRole("button", { name: "Add trait" }).click();
-    let available = page.getByRole("dialog", { name: "Available traits" });
-    await expect(available).toHaveAttribute("data-side", "left");
+    const available = page.getByRole("dialog", { name: "Available traits" });
     await expect(
-      available.getByRole("img", { name: "Custom category" }),
-    ).toBeVisible();
+      available
+        .getByRole("button", { name: "Personal style" })
+        .locator("xpath=ancestor::li"),
+    ).toHaveAttribute("data-category-tone", "amber");
     await page.keyboard.press("Escape");
+    await builder.getByRole("tab", { name: "Sections" }).click();
 
     const tile = active
-      .getByRole("button", { name: "Buzz identity", exact: true })
-      .locator("xpath=ancestor::li");
-    const target = active
       .getByRole("button", { name: "Threading", exact: true })
       .locator("xpath=ancestor::li");
+    const target = active.getByLabel("Capabilities is empty", { exact: true });
+    await target.scrollIntoViewIfNeeded();
+    await tile.scrollIntoViewIfNeeded();
     const [tileBox, targetBox] = await Promise.all([
       tile.boundingBox(),
       target.boundingBox(),
@@ -221,32 +272,28 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
           .evaluateAll((rows) => rows.map((row) => row.dataset.traitKey)),
       )
       .toEqual([
-        "buzz.agent-instructions/threading",
         "buzz.agent-instructions/buzz-identity",
-        "buzz.agent-instructions/engineering-discipline",
+        "buzz.agent-instructions/threading",
+        "buzz.projects/projects",
       ]);
 
     await active
-      .getByRole("button", { name: "Actions for Buzz identity" })
-      .click();
-    await page.getByRole("menuitem", { name: "Move later" }).click();
-    await active
       .getByRole("button", { name: "Threading", exact: true })
       .click();
-    const editor = page.getByRole("dialog", { name: "Edit Threading" });
-    await editor
+    const defaultEditor = page.getByRole("dialog", { name: "Edit Threading" });
+    await defaultEditor
       .getByRole("textbox", { name: "Instructions" })
-      .fill("## Threading\n\nPrefer shallow human threads.");
-    await editor.getByRole("button", { name: "Save trait" }).click();
+      .fill("Prefer shallow human threads.");
+    await defaultEditor.getByRole("button", { name: "Save trait" }).click();
 
+    await active.getByRole("button", { name: "Actions for Projects" }).click();
+    await expect(page.getByRole("menuitem", { name: "View" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Remove" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
     await active
-      .getByRole("button", { name: "Actions for Engineering discipline" })
+      .getByRole("button", { name: "Add to Capabilities", exact: true })
       .click();
-    await page.getByRole("menuitem", { name: "Remove" }).click();
-    await active.getByRole("button", { name: "Add trait" }).click();
-    available = page.getByRole("dialog", { name: "Available traits" });
-    await expect(available.getByText("Engineering discipline")).toBeVisible();
-    await available.getByRole("button", { name: "New trait" }).click();
+    await page.getByRole("menuitem", { name: "Add trait" }).click();
     const create = page.getByRole("dialog", { name: "Create trait" });
     await create.getByRole("textbox", { name: "Trait name" }).fill("Curiosity");
     await create
@@ -257,6 +304,15 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
     const applyBasePrompt = builder.getByRole("button", {
       name: "Apply base prompt",
     });
+    const floatingFooter = builder.locator(".base-prompt-footer");
+    await expect(floatingFooter).toHaveCSS("position", "fixed");
+    const floatingBox = await floatingFooter.boundingBox();
+    expect(
+      page.viewportSize().height - floatingBox.y - floatingBox.height,
+    ).toBeGreaterThan(0);
+    expect(
+      page.viewportSize().height - floatingBox.y - floatingBox.height,
+    ).toBeLessThan(40);
     expect(
       await applyBasePrompt.evaluate((button) => ({
         disabled: button.disabled,
@@ -279,6 +335,7 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
         "Base prompt applied. Running agents were not restarted.",
       ),
     ).toBeAttached();
+    await expect(applyBasePrompt).toHaveCount(0);
     await expect(
       active.getByText("Running agents to restart").locator(".."),
     ).toContainText("1");
@@ -292,7 +349,12 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
       adoption[0].payload.draft.composition.modules.map(
         (module) => module.title,
       ),
-    ).toEqual(["Threading", "Buzz identity", "Curiosity"]);
+    ).toEqual(["Buzz identity", "Projects", "Threading", "Curiosity"]);
+    expect(
+      adoption[0].payload.draft.composition.modules.find(
+        (module) => module.title === "Threading",
+      ).text,
+    ).toBe("Prefer shallow human threads.");
 
     const categoryColors = await traitCategoryColors(builder);
     expect(new Set(Object.values(categoryColors)).size).toBeGreaterThanOrEqual(
@@ -321,6 +383,7 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
       new Set(Object.values(darkCategoryColors)).size,
     ).toBeGreaterThanOrEqual(3);
     expect(darkCategoryColors).not.toEqual(categoryColors);
+    await builder.getByRole("tab", { name: "All entries" }).click();
     await active.getByRole("button", { name: "Add trait" }).click();
     const narrowAvailableBox = await page
       .getByRole("dialog", { name: "Available traits" })

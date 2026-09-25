@@ -9,7 +9,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
     id: "projects",
     title: "Projects",
     order: 30,
-    text: instructions,
+    category: "plugins",
+    text: instructions.replace(/^## Projects\s*/u, "").trimEnd(),
   });
   ctx.pages.register({
     id: "projects",

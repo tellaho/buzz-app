@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -9,8 +10,13 @@ import {
 } from "react";
 import type {
   AgentInstructions,
+  InstructionCategory,
   SavedInstructions,
   SavedModule,
+} from "../../features/agent-instructions/service";
+import {
+  INSTRUCTION_TONES,
+  validInstructionBody,
 } from "../../features/agent-instructions/service";
 import type {
   AgentControl,
@@ -19,16 +25,10 @@ import type {
 import {
   ArrowDownIcon,
   ArrowUpIcon,
-  ChatCircleIcon,
   DotsThreeIcon,
-  FileTextIcon,
-  GitBranchIcon,
   PencilSimpleIcon,
   PlusIcon,
-  SquaresFourIcon,
   TrashIcon,
-  UserIcon,
-  WrenchIcon,
   XIcon,
 } from "../../shared/design-system/icons";
 import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
@@ -52,9 +52,12 @@ import {
   PopoverTrigger,
 } from "../../shared/design-system/ui/Popover";
 import { Textarea } from "../../shared/design-system/ui/Textarea";
+import { Tabs } from "../../shared/design-system/ui/Tabs";
+import { Select } from "../../shared/design-system/ui/Select";
 import {
   availableInstructionModules,
   DEFAULT_INSTRUCTIONS_PLUGIN,
+  editableInstructionModule,
   estimateInstructionTokens,
   instructionBoardColumns,
   instructionCategory,
@@ -64,14 +67,14 @@ import {
   instructionDraftChanged,
   instructionModuleState,
   instructionPercentage,
-  instructionTextWithBoundary,
+  instructionPrompt,
   instructionTileSpan,
   LOCAL_INSTRUCTIONS_PLUGIN,
   LOCAL_INSTRUCTIONS_REVISION,
   normalizedModules,
+  nextInstructionTone,
   preparedInstructionDraft,
   sourceModule,
-  type InstructionCategory,
   type InstructionModuleState,
   type MutableInstructionDraft,
 } from "./base-instruction-draft";
@@ -100,9 +103,11 @@ type Drag = {
   }[];
 };
 type DragOffset = { key: string; x: number; y: number };
+type DropTarget = { index: number; category?: string };
 type BoardStyle = CSSProperties & {
   "--base-prompt-board-columns": number;
   "--base-prompt-board-cell": string;
+  "--base-prompt-section-row": string;
 };
 
 /** Global profile editor. Drafts remain local until one CAS-pinned adoption. */
@@ -150,40 +155,68 @@ function BaseInstructionBuilder({
   const [editor, setEditor] = useState<Editor | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<SavedModule | null>(null);
+  const [deletingCategory, setDeletingCategory] =
+    useState<InstructionCategory | null>(null);
   const [openActions, setOpenActions] = useState<string | null>(null);
   const [availableOpen, setAvailableOpen] = useState(false);
+  const [libraryAnchor, setLibraryAnchor] = useState<HTMLElement | null>(null);
   const [libraryFocus, setLibraryFocus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [viewMode, setViewMode] = useState<"sections" | "all">("sections");
   const board = useRef<HTMLOListElement>(null);
   const editorName = useRef<HTMLInputElement>(null);
   const pendingMenuEdit = useRef<SavedModule | null>(null);
   const suppressMenuFocus = useRef<string | null>(null);
+  const switchingView = useRef(false);
   const traitTiles = useRef(new Map<string, HTMLLIElement>());
+  const categoryAddAnchors = useRef(new Map<string, HTMLElement>());
   const libraryActions = useRef(new Map<string, HTMLElement>());
   const boardMetrics = useInstructionBoard(board);
   const drag = useRef<Drag | null>(null);
   const suppressEdit = useRef(false);
   const [dragOffset, setDragOffset] = useState<DragOffset | null>(null);
-  const [dropAt, setDropAt] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const dragging = dragOffset !== null;
   const stale = saved.revision !== baseRevision;
   const changed = instructionDraftChanged(draft, saved, proposal);
   const prepared = preparedInstructionDraft(draft, proposal);
-  const prompt = draft.composition.modules
-    .map((module) => module.text)
-    .join("");
+  const prompt = instructionPrompt(
+    draft.composition.categories,
+    draft.composition.modules,
+  );
   const estimatedTokens = estimateInstructionTokens(prompt);
+  const categoriesValid = draft.composition.categories.every(
+    (category) => category.title.trim() && !/[\r\n\0]/u.test(category.title),
+  );
   const categorySummaries = instructionCategorySummaries(
     draft.composition.modules,
+    draft.composition.categories,
   );
   const pending =
     state.data?.agents.filter(
       (agent) =>
         agent.runningInstructions &&
-        agent.runningInstructions.revision !== saved.revision,
+        agent.savedInstructions &&
+        agent.runningInstructions.sha256 !== agent.savedInstructions.sha256,
     ).length ?? 0;
-  const available = availableInstructionModules(draft, proposal);
+  const available = availableInstructionModules(draft, proposal).filter(
+    (module) => module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN,
+  );
+  const orderedModules = draft.composition.categories.flatMap((category) =>
+    draft.composition.modules.filter(
+      (module) => module.category === category.id,
+    ),
+  );
+  const boardItems: Array<InstructionCategory | SavedModule> =
+    viewMode === "sections"
+      ? draft.composition.categories.flatMap((category) => [
+          category,
+          ...draft.composition.modules.filter(
+            (module) => module.category === category.id,
+          ),
+        ])
+      : orderedModules;
   const editorSource = editor
     ? sourceModule(editor.module.key, proposal)
     : undefined;
@@ -200,6 +233,82 @@ function BaseInstructionBuilder({
     setDraft(update);
     setError(null);
   };
+  const updateCategory = (
+    id: string,
+    update: (category: InstructionCategory) => InstructionCategory,
+  ) =>
+    mutate((current) => ({
+      ...current,
+      composition: {
+        ...current.composition,
+        categories: current.composition.categories.map((category) =>
+          category.id === id ? update(category) : category,
+        ),
+      },
+    }));
+  const addCategory = () =>
+    mutate((current) => ({
+      ...current,
+      composition: {
+        ...current.composition,
+        categories: [
+          ...current.composition.categories,
+          {
+            id: `category-${globalThis.crypto.randomUUID()}`,
+            title: "New category",
+            tone: nextInstructionTone(current.composition.categories),
+          },
+        ],
+      },
+    }));
+  const addTrait = (category: string) => {
+    const id = globalThis.crypto.randomUUID();
+    setLibraryAnchor(categoryAddAnchors.current.get(category) ?? null);
+    setAvailableOpen(true);
+    edit(
+      {
+        key: `${LOCAL_INSTRUCTIONS_PLUGIN}/${id}`,
+        title: "New trait",
+        pluginId: LOCAL_INSTRUCTIONS_PLUGIN,
+        revision: LOCAL_INSTRUCTIONS_REVISION,
+        order: draft.composition.modules.length * 10,
+        category,
+        text: "",
+      },
+      "new",
+    );
+  };
+  const resetAllToDefaults = () => {
+    setDraft(
+      instructionDraft({
+        revision: saved.revision,
+        composition: proposal.composition,
+        inactiveModules: [],
+      }),
+    );
+    setBaseRevision(saved.revision);
+    setEditor(null);
+    setEditorError(null);
+    setAvailableOpen(false);
+    setOpenActions(null);
+    setDeleting(null);
+    setDeletingCategory(null);
+    setError(null);
+  };
+  const moveCategory = (id: string, offset: -1 | 1) =>
+    mutate((current) => {
+      const categories = [...current.composition.categories];
+      const from = categories.findIndex((category) => category.id === id);
+      const to = from + offset;
+      if (from < 0 || to < 0 || to >= categories.length) return current;
+      const [category] = categories.splice(from, 1);
+      if (!category) return current;
+      categories.splice(to, 0, category);
+      return {
+        ...current,
+        composition: { ...current.composition, categories },
+      };
+    });
   const traitSide = (key: string) => {
     const tile = traitTiles.current.get(key);
     const list = board.current;
@@ -233,11 +342,17 @@ function BaseInstructionBuilder({
     setEditor(null);
     setEditorError(null);
   };
-  const move = (from: number, to: number) => {
-    if (to < 0 || to >= draft.composition.modules.length || from === to) return;
+  const move = (from: number, to: number, category?: string) => {
+    if (
+      to < 0 ||
+      to >= draft.composition.modules.length ||
+      (from === to && !category)
+    )
+      return;
     mutate((current) => {
       const modules = [...current.composition.modules];
-      const [module] = modules.splice(from, 1);
+      const [source] = modules.splice(from, 1);
+      const module = source && category ? { ...source, category } : source;
       if (!module) return current;
       modules.splice(to, 0, module);
       return {
@@ -257,7 +372,7 @@ function BaseInstructionBuilder({
   const stopDrag = () => {
     drag.current = null;
     setDragOffset(null);
-    setDropAt(null);
+    setDropTarget(null);
   };
   useEffect(() => {
     if (!dragging) return;
@@ -265,7 +380,7 @@ function BaseInstructionBuilder({
       if (event.key === "Escape") {
         drag.current = null;
         setDragOffset(null);
-        setDropAt(null);
+        setDropTarget(null);
       }
     };
     window.addEventListener("keydown", cancel);
@@ -325,6 +440,27 @@ function BaseInstructionBuilder({
     }
     active.started = true;
     setDragOffset({ key: active.key, x, y });
+    const hits =
+      document.elementsFromPoint?.(event.clientX, event.clientY) ?? [];
+    const hitCategory =
+      viewMode === "sections"
+        ? hits
+            .map((element) =>
+              element.closest<HTMLElement>("[data-drop-category]"),
+            )
+            .find((element) => element?.dataset.dropCategory)
+        : undefined;
+    if (hitCategory?.dataset.dropCategory) {
+      const category = hitCategory.dataset.dropCategory;
+      const first = draft.composition.modules.findIndex(
+        (module) => module.category === category,
+      );
+      setDropTarget({
+        index: first >= 0 ? first : draft.composition.modules.length - 1,
+        category,
+      });
+      return;
+    }
     const geometricTarget = active.targets.find(
       (target) =>
         target.key !== active.key &&
@@ -333,8 +469,7 @@ function BaseInstructionBuilder({
         event.clientY >= target.top &&
         event.clientY <= target.bottom,
     );
-    const hitTarget = document
-      .elementsFromPoint?.(event.clientX, event.clientY)
+    const hitTarget = hits
       .map((element) => element.closest<HTMLElement>("[data-trait-key]"))
       .find((element) => element && element.dataset.traitKey !== active.key);
     const targetKey = geometricTarget?.key ?? hitTarget?.dataset.traitKey;
@@ -355,7 +490,9 @@ function BaseInstructionBuilder({
           .map((target) => target.bottom);
         const afterContent =
           otherBottoms.length > 0 && event.clientY > Math.max(...otherBottoms);
-        setDropAt(afterContent ? draft.composition.modules.length - 1 : from);
+        setDropTarget({
+          index: afterContent ? draft.composition.modules.length - 1 : from,
+        });
       }
       return;
     }
@@ -363,16 +500,32 @@ function BaseInstructionBuilder({
       (module) => module.key === targetKey,
     );
     if (index < 0) return;
-    setDropAt(index);
+    const source = draft.composition.modules.find(
+      (module) => module.key === active.key,
+    );
+    const target = draft.composition.modules[index];
+    if (
+      viewMode === "all" &&
+      source?.category !== undefined &&
+      target?.category !== source.category
+    ) {
+      setDropTarget(null);
+      return;
+    }
+    setDropTarget(
+      viewMode === "sections" && target?.category
+        ? { index, category: target.category }
+        : { index },
+    );
   };
   const pointerUp = (event: ReactPointerEvent<HTMLOListElement>) => {
     const active = drag.current;
     if (!active || active.pointerId !== event.pointerId) return;
-    if (active.started && dropAt !== null) {
+    if (active.started && dropTarget) {
       const from = draft.composition.modules.findIndex(
         (module) => module.key === active.key,
       );
-      move(from, dropAt);
+      move(from, dropTarget.index, dropTarget.category);
     }
     if (active.started) {
       suppressEdit.current = true;
@@ -384,6 +537,10 @@ function BaseInstructionBuilder({
   };
   const saveEditor = () => {
     if (!editor) return;
+    if (!editableInstructionModule(editor.module)) {
+      setEditor(null);
+      return;
+    }
     if (!editor.title.trim()) {
       setEditorError("Give this trait a name.");
       return;
@@ -392,10 +549,16 @@ function BaseInstructionBuilder({
       setEditorError("Traits cannot contain null characters.");
       return;
     }
+    if (!validInstructionBody(editor.text)) {
+      setEditorError(
+        "Invalid entry: category and item headings are generated. Remove H1–H3 headings from the instructions.",
+      );
+      return;
+    }
     const edited = {
       ...editor.module,
       title: editor.title.trim(),
-      text: instructionTextWithBoundary(editor.text, editor.module.text),
+      text: editor.text.trimEnd(),
     };
     mutate((current) => {
       if (editor.location === "active")
@@ -448,8 +611,9 @@ function BaseInstructionBuilder({
               : `Edit ${editor.module.title}`}
           </PopoverTitle>
           <PopoverDescription>
-            Edit the trait name and the Markdown instructions added to the
-            shared base prompt.
+            {editableInstructionModule(editor.module)
+              ? "Edit the trait name and body-only Markdown added to the shared base prompt."
+              : "Plugin instructions are read-only. Organize them from the category board."}
           </PopoverDescription>
         </div>
         <PopoverClose
@@ -464,10 +628,33 @@ function BaseInstructionBuilder({
       </header>
       <div className="base-prompt-editor-fields">
         <TraitStateDetails module={editor.module} proposal={proposal} />
+        {editor.module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN && (
+          <Select
+            label="Category"
+            variant="field"
+            value={editor.module.category ?? "custom"}
+            groups={[
+              {
+                label: "Categories",
+                options: draft.composition.categories.map((category) => ({
+                  value: category.id,
+                  label: category.title,
+                })),
+              },
+            ]}
+            onValueChange={(category) =>
+              setEditor({
+                ...editor,
+                module: { ...editor.module, category },
+              })
+            }
+          />
+        )}
         <Field label="Trait name" error={editorError}>
           <Input
             ref={editorName}
             autoFocus
+            disabled={!editableInstructionModule(editor.module)}
             textSize="large"
             value={editor.title}
             onChange={(event) => {
@@ -482,6 +669,7 @@ function BaseInstructionBuilder({
               variant="code"
               textSize="large"
               rows={18}
+              disabled={!editableInstructionModule(editor.module)}
               value={
                 editor.dirty ? editor.text : instructionEditorText(editor.text)
               }
@@ -493,27 +681,33 @@ function BaseInstructionBuilder({
                 })
               }
             />
-            {editorSource && editorDiffersFromSource && (
-              <button
-                type="button"
-                className="base-prompt-editor-reset text-caption"
-                onClick={() => {
-                  setEditor({
-                    ...editor,
-                    module: {
-                      ...editorSource,
-                      order: editor.module.order,
-                    },
-                    title: editorSource.title,
-                    text: editorSource.text,
-                    dirty: false,
-                  });
-                  setEditorError(null);
-                }}
-              >
-                Reset to default
-              </button>
-            )}
+            {editorSource &&
+              editableInstructionModule(editor.module) &&
+              editorDiffersFromSource && (
+                <button
+                  type="button"
+                  className="base-prompt-editor-reset text-caption"
+                  onClick={() => {
+                    setEditor({
+                      ...editor,
+                      module: {
+                        ...editorSource,
+                        order: editor.module.order,
+                        category:
+                          editor.module.category ??
+                          editorSource.category ??
+                          "uncategorized",
+                      },
+                      title: editorSource.title,
+                      text: editorSource.text,
+                      dirty: false,
+                    });
+                    setEditorError(null);
+                  }}
+                >
+                  Reset to default
+                </button>
+              )}
           </div>
         </Field>
       </div>
@@ -526,9 +720,11 @@ function BaseInstructionBuilder({
         >
           Cancel
         </Button>
-        <Button variant="primary" onClick={saveEditor}>
-          Save trait
-        </Button>
+        {editableInstructionModule(editor.module) && (
+          <Button variant="primary" onClick={saveEditor}>
+            Save trait
+          </Button>
+        )}
       </footer>
     </div>
   );
@@ -538,8 +734,8 @@ function BaseInstructionBuilder({
       {proposal.error && <p role="alert">{proposal.error}</p>}
       {stale && (
         <p role="alert" className="text-danger">
-          The host has a newer saved base prompt. Your draft is retained;
-          discard it to load the latest revision before applying more changes.
+          The host has a newer saved base prompt. Your draft is retained; reset
+          to defaults or reopen this view before applying more changes.
         </p>
       )}
       {!!prepared.unavailable.length && (
@@ -552,6 +748,11 @@ function BaseInstructionBuilder({
       {error && (
         <p role="alert" className="text-danger">
           {error}
+        </p>
+      )}
+      {!categoriesValid && (
+        <p role="alert" className="text-danger">
+          Category headings must be non-empty single lines.
         </p>
       )}
       <p className="sr-only" aria-live="polite">
@@ -600,27 +801,57 @@ function BaseInstructionBuilder({
             </dl>
           </section>
         </div>
-        <ul
-          className="base-prompt-category-legend text-body-sm"
-          aria-label="Approximate prompt cost by category"
+        <div
+          onPointerDownCapture={(event) => {
+            const value =
+              event.target instanceof Element
+                ? event.target.closest<HTMLElement>("[data-tab-value]")?.dataset
+                    .tabValue
+                : undefined;
+            if (value && value !== viewMode) switchingView.current = true;
+          }}
         >
-          {categorySummaries.map((summary) => (
-            <li
-              key={summary.category}
-              data-trait-category={categoryKey(summary.category)}
-            >
-              <span className="base-prompt-category-swatch" aria-hidden />
-              <span>{summary.category}</span>
-              <span className="text-secondary">
-                ~{summary.tokens.toLocaleString()} ·{" "}
-                {formatInstructionPercentage(summary.percentage)}
-              </span>
-            </li>
-          ))}
-        </ul>
+          <Tabs
+            value={viewMode}
+            items={[
+              { value: "sections", label: "Sections" },
+              { value: "all", label: "All entries" },
+            ]}
+            label="Base prompt view"
+            variant="panel"
+            onValueChange={(value) => {
+              switchingView.current = true;
+              setViewMode(value);
+              window.setTimeout(() => {
+                switchingView.current = false;
+              });
+            }}
+          />
+        </div>
+        {viewMode === "all" && (
+          <ul
+            className="base-prompt-category-legend text-body-sm"
+            aria-label="Approximate prompt cost by category"
+          >
+            {categorySummaries.map((summary) => (
+              <li
+                key={summary.category.id}
+                data-category-tone={summary.category.tone}
+              >
+                <span className="base-prompt-category-swatch" aria-hidden />
+                <span>{summary.category.title}</span>
+                <span className="text-secondary">
+                  ~{summary.tokens.toLocaleString()} ·{" "}
+                  {formatInstructionPercentage(summary.percentage)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
         <ol
           ref={board}
           className="base-prompt-board"
+          data-view-mode={viewMode}
           data-has-selection={
             editor?.location === "active" || availableOpen ? "true" : undefined
           }
@@ -632,25 +863,212 @@ function BaseInstructionBuilder({
             {
               "--base-prompt-board-columns": boardMetrics.columns,
               "--base-prompt-board-cell": `${boardMetrics.cell}px`,
+              "--base-prompt-section-row": `${Math.min(
+                56,
+                boardMetrics.cell / 2,
+              )}px`,
             } as BoardStyle
           }
         >
-          {draft.composition.modules.map((module, index) => {
-            const category = instructionCategory(module);
+          {boardItems.map((item, boardIndex) => {
+            if ("tone" in item) {
+              const category = item;
+              const categoryIndex = draft.composition.categories.findIndex(
+                (candidate) => candidate.id === category.id,
+              );
+              const summary = categorySummaries.find(
+                (candidate) => candidate.category.id === category.id,
+              );
+              return (
+                <Fragment key={`category:${category.id}`}>
+                  <li
+                    className="base-prompt-category-heading"
+                    data-category-tone={category.tone}
+                    data-drop-category={category.id}
+                    data-drop-target={
+                      dropTarget?.category === category.id ? "true" : undefined
+                    }
+                  >
+                    <MenuRoot>
+                      <MenuTrigger
+                        render={
+                          <button
+                            type="button"
+                            className="base-prompt-category-color"
+                            aria-label={`Change color for ${category.title}`}
+                          />
+                        }
+                      />
+                      <MenuPopup align="start" size="compact">
+                        {INSTRUCTION_TONES.map((tone) => (
+                          <MenuItem
+                            key={tone}
+                            onClick={() =>
+                              updateCategory(category.id, (current) => ({
+                                ...current,
+                                tone,
+                              }))
+                            }
+                          >
+                            <span
+                              className="base-prompt-tone-option"
+                              data-category-tone={tone}
+                              aria-hidden
+                            />
+                            {tone[0]?.toUpperCase()}
+                            {tone.slice(1)}
+                          </MenuItem>
+                        ))}
+                      </MenuPopup>
+                    </MenuRoot>
+                    <div className="base-prompt-category-title">
+                      <Input
+                        aria-label={`Category heading for ${category.title}`}
+                        aria-invalid={
+                          !category.title.trim() ||
+                          /[\r\n\0]/u.test(category.title)
+                        }
+                        value={category.title}
+                        onChange={(event) => {
+                          const title = event.currentTarget.value;
+                          updateCategory(category.id, (current) => ({
+                            ...current,
+                            title,
+                          }));
+                        }}
+                      />
+                    </div>
+                    <span className="text-body-sm text-secondary">
+                      ~{summary?.tokens.toLocaleString() ?? 0} tokens
+                    </span>
+                    <MenuRoot>
+                      <MenuTrigger
+                        render={
+                          <IconButton
+                            ref={(node) => {
+                              if (node)
+                                categoryAddAnchors.current.set(
+                                  category.id,
+                                  node,
+                                );
+                              else
+                                categoryAddAnchors.current.delete(category.id);
+                            }}
+                            size="compact"
+                            aria-label={`Add to ${category.title}`}
+                            icon={<PlusIcon size={16} aria-hidden="true" />}
+                          />
+                        }
+                      />
+                      <MenuPopup align="end" size="compact">
+                        <MenuItem onClick={() => addTrait(category.id)}>
+                          Add trait
+                        </MenuItem>
+                        <MenuItem onClick={addCategory}>Add category</MenuItem>
+                      </MenuPopup>
+                    </MenuRoot>
+                    <MenuRoot>
+                      <MenuTrigger
+                        render={
+                          <IconButton
+                            size="compact"
+                            aria-label={`Actions for ${category.title}`}
+                            icon={
+                              <DotsThreeIcon size={16} aria-hidden="true" />
+                            }
+                          />
+                        }
+                      />
+                      <MenuPopup align="end" size="compact">
+                        <MenuItem
+                          disabled={categoryIndex === 0}
+                          onClick={() => moveCategory(category.id, -1)}
+                        >
+                          <MenuIcon>
+                            <ArrowUpIcon size={16} />
+                          </MenuIcon>
+                          Move earlier
+                        </MenuItem>
+                        <MenuItem
+                          disabled={
+                            categoryIndex ===
+                            draft.composition.categories.length - 1
+                          }
+                          onClick={() => moveCategory(category.id, 1)}
+                        >
+                          <MenuIcon>
+                            <ArrowDownIcon size={16} />
+                          </MenuIcon>
+                          Move later
+                        </MenuItem>
+                        <MenuItem
+                          tone="danger"
+                          disabled={category.id === "uncategorized"}
+                          onClick={() => setDeletingCategory(category)}
+                        >
+                          <MenuIcon>
+                            <TrashIcon size={16} />
+                          </MenuIcon>
+                          Delete category
+                        </MenuItem>
+                      </MenuPopup>
+                    </MenuRoot>
+                  </li>
+                  {!summary && (
+                    <li
+                      className="base-prompt-empty-category text-body-sm text-secondary"
+                      data-category-tone={category.tone}
+                      data-drop-category={category.id}
+                      data-drop-target={
+                        dropTarget?.category === category.id
+                          ? "true"
+                          : undefined
+                      }
+                      aria-label={`${category.title} is empty`}
+                    >
+                      Drop entries here
+                    </li>
+                  )}
+                </Fragment>
+              );
+            }
+            const module = item;
+            const index = draft.composition.modules.findIndex(
+              (candidate) => candidate.key === module.key,
+            );
+            const sequence =
+              orderedModules.findIndex(
+                (candidate) => candidate.key === module.key,
+              ) + 1;
+            const category = instructionCategory(
+              module,
+              draft.composition.categories,
+            );
             const percentage = instructionPercentage(
               module.text.length,
               prompt.length,
             );
-            const span = instructionTileSpan(
+            const proportionalSpan = instructionTileSpan(
               module.text.length,
               prompt.length,
               boardMetrics.columns,
             );
+            const span = {
+              ...proportionalSpan,
+              columns:
+                viewMode === "sections"
+                  ? 1
+                  : Math.min(proportionalSpan.columns, 2),
+              rows:
+                viewMode === "sections"
+                  ? 2
+                  : Math.min(proportionalSpan.rows, 2),
+            };
             const offset =
               dragOffset?.key === module.key ? dragOffset : undefined;
             const editorOpen =
               editor?.location === "active" && editor.module.key === module.key;
-            const triggerId = `base-prompt-trait-${index}`;
+            const triggerId = `base-prompt-trait-${boardIndex}`;
             return (
               <li
                 key={module.key}
@@ -659,10 +1077,10 @@ function BaseInstructionBuilder({
                   else traitTiles.current.delete(module.key);
                 }}
                 data-trait-key={module.key}
-                data-trait-category={categoryKey(category)}
+                data-category-tone={category.tone}
                 data-trait-units={span.units}
                 data-drop-target={
-                  dropAt === index && dragOffset?.key !== module.key
+                  dropTarget?.index === index && dragOffset?.key !== module.key
                     ? "true"
                     : undefined
                 }
@@ -689,7 +1107,7 @@ function BaseInstructionBuilder({
                         return;
                       }
                       edit(module, "active");
-                    } else if (editorOpen) {
+                    } else if (editorOpen && !switchingView.current) {
                       setEditor(null);
                     }
                   }}
@@ -704,12 +1122,8 @@ function BaseInstructionBuilder({
                       >
                         <span className="base-prompt-trait-heading">
                           <span className="base-prompt-trait-sequence text-caption">
-                            {index + 1}
+                            {sequence}
                           </span>
-                          <TraitCategoryIcon
-                            category={category}
-                            state={instructionModuleState(module, proposal)}
-                          />
                         </span>
                         <span className="base-prompt-board-title text-label">
                           {module.title}
@@ -721,7 +1135,9 @@ function BaseInstructionBuilder({
                           ).toLocaleString()}{" "}
                           tokens · {formatInstructionPercentage(percentage)}
                         </span>
-                        <span className="sr-only">{category} category</span>
+                        <span className="sr-only">
+                          {category.title} category
+                        </span>
                       </button>
                     }
                   />
@@ -783,10 +1199,14 @@ function BaseInstructionBuilder({
                         <MenuIcon>
                           <PencilSimpleIcon size={16} />
                         </MenuIcon>
-                        Edit
+                        {editableInstructionModule(module) ? "Edit" : "View"}
                       </MenuItem>
                       <MenuItem
-                        disabled={index === 0}
+                        disabled={
+                          index === 0 ||
+                          draft.composition.modules[index - 1]?.category !==
+                            module.category
+                        }
                         onClick={() => {
                           setOpenActions(null);
                           move(index, index - 1);
@@ -799,7 +1219,9 @@ function BaseInstructionBuilder({
                       </MenuItem>
                       <MenuItem
                         disabled={
-                          index === draft.composition.modules.length - 1
+                          index === draft.composition.modules.length - 1 ||
+                          draft.composition.modules[index + 1]?.category !==
+                            module.category
                         }
                         onClick={() => {
                           setOpenActions(null);
@@ -811,35 +1233,37 @@ function BaseInstructionBuilder({
                         </MenuIcon>
                         Move later
                       </MenuItem>
-                      <MenuItem
-                        tone="danger"
-                        disabled={draft.composition.modules.length === 1}
-                        onClick={() => {
-                          setOpenActions(null);
-                          mutate((current) => ({
-                            ...current,
-                            composition: {
-                              ...current.composition,
-                              modules: normalizedModules(
-                                current.composition.modules.filter(
+                      {module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN && (
+                        <MenuItem
+                          tone="danger"
+                          disabled={draft.composition.modules.length === 1}
+                          onClick={() => {
+                            setOpenActions(null);
+                            mutate((current) => ({
+                              ...current,
+                              composition: {
+                                ...current.composition,
+                                modules: normalizedModules(
+                                  current.composition.modules.filter(
+                                    (candidate) => candidate.key !== module.key,
+                                  ),
+                                ),
+                              },
+                              inactiveModules: [
+                                ...current.inactiveModules.filter(
                                   (candidate) => candidate.key !== module.key,
                                 ),
-                              ),
-                            },
-                            inactiveModules: [
-                              ...current.inactiveModules.filter(
-                                (candidate) => candidate.key !== module.key,
-                              ),
-                              module,
-                            ],
-                          }));
-                        }}
-                      >
-                        <MenuIcon>
-                          <TrashIcon size={16} />
-                        </MenuIcon>
-                        Remove
-                      </MenuItem>
+                                module,
+                              ],
+                            }));
+                          }}
+                        >
+                          <MenuIcon>
+                            <TrashIcon size={16} />
+                          </MenuIcon>
+                          Remove
+                        </MenuItem>
+                      )}
                     </MenuPopup>
                   </MenuRoot>
                 </div>
@@ -849,6 +1273,7 @@ function BaseInstructionBuilder({
           <li
             className="base-prompt-add-row"
             data-selected={availableOpen ? "true" : undefined}
+            hidden={viewMode === "sections"}
           >
             <PopoverRoot
               open={availableOpen}
@@ -856,6 +1281,7 @@ function BaseInstructionBuilder({
               onOpenChange={(open) => {
                 setAvailableOpen(open);
                 if (!open && editor?.location !== "active") {
+                  setLibraryAnchor(null);
                   setEditor(null);
                   setEditorError(null);
                   setLibraryFocus(null);
@@ -869,6 +1295,7 @@ function BaseInstructionBuilder({
                     type="button"
                     className="base-prompt-add-trait"
                     aria-label="Add trait"
+                    onClick={() => setLibraryAnchor(null)}
                   >
                     <PlusIcon size={24} aria-hidden="true" />
                   </button>
@@ -880,6 +1307,8 @@ function BaseInstructionBuilder({
                 }
                 side="left"
                 align="end"
+                anchor={libraryAnchor ?? undefined}
+                finalFocus={libraryAnchor ? () => libraryAnchor : undefined}
                 size="wide"
                 initialFocus={
                   editor && editor.location !== "active"
@@ -912,6 +1341,7 @@ function BaseInstructionBuilder({
                             pluginId: LOCAL_INSTRUCTIONS_PLUGIN,
                             revision: LOCAL_INSTRUCTIONS_REVISION,
                             order: draft.composition.modules.length * 10,
+                            category: "custom",
                             text: "",
                           },
                           "new",
@@ -925,21 +1355,20 @@ function BaseInstructionBuilder({
                     {!!available.length && (
                       <ul className="base-prompt-library-list">
                         {available.map((module) => {
-                          const category = instructionCategory(module);
+                          const category = instructionCategory(
+                            module,
+                            draft.composition.categories,
+                          );
                           return (
                             <li
                               key={module.key}
                               className="base-prompt-available-trait"
-                              data-trait-category={categoryKey(category)}
+                              data-category-tone={category.tone}
                               {...traitStateAttributes(module, proposal)}
                             >
                               <span
                                 className="base-prompt-category-swatch"
                                 aria-hidden
-                              />
-                              <TraitCategoryIcon
-                                category={category}
-                                state={instructionModuleState(module, proposal)}
                               />
                               <button
                                 ref={(node) => {
@@ -962,7 +1391,7 @@ function BaseInstructionBuilder({
                                   {module.title}
                                 </span>
                                 <span className="text-body-sm text-secondary">
-                                  {category} · ~
+                                  {category.title} · ~
                                   {estimateInstructionTokens(
                                     module.text,
                                   ).toLocaleString()}{" "}
@@ -1026,22 +1455,21 @@ function BaseInstructionBuilder({
         </ol>
       </section>
 
-      <div className="base-prompt-footer">
-        <p className="m-0 text-body-sm text-secondary">
-          Changes affect future starts and restarts. Running work is never
-          restarted automatically.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            disabled={!changed || state.busy}
-            onClick={() => {
-              setDraft(instructionDraft(saved));
-              setBaseRevision(saved.revision);
-              setError(null);
-            }}
-          >
-            Discard changes
-          </Button>
+      <div className="base-prompt-reset">
+        <Button
+          disabled={state.busy || !!proposal.error}
+          onClick={resetAllToDefaults}
+        >
+          Reset all to default
+        </Button>
+      </div>
+
+      {changed && (
+        <div className="base-prompt-footer">
+          <p className="m-0 text-body-sm text-secondary">
+            Changes affect future starts and restarts. Running work is never
+            restarted automatically.
+          </p>
           <Button
             variant="primary"
             loading={state.busy}
@@ -1050,6 +1478,7 @@ function BaseInstructionBuilder({
               stale ||
               !!proposal.error ||
               !!prepared.unavailable.length ||
+              !categoriesValid ||
               !prompt.trim() ||
               state.status !== "ready"
             }
@@ -1076,7 +1505,7 @@ function BaseInstructionBuilder({
             Apply base prompt
           </Button>
         </div>
-      </div>
+      )}
 
       {deleting && (
         <AlertDialog
@@ -1104,47 +1533,54 @@ function BaseInstructionBuilder({
           }
         />
       )}
-    </section>
-  );
-}
-
-function TraitCategoryIcon({
-  category,
-  state,
-}: {
-  category: InstructionCategory;
-  state: InstructionModuleState;
-}) {
-  const Icon =
-    category === "Core"
-      ? FileTextIcon
-      : category === "Capabilities"
-        ? WrenchIcon
-        : category === "Communication"
-          ? ChatCircleIcon
-          : category === "Practice"
-            ? GitBranchIcon
-            : category === "Plugin"
-              ? SquaresFourIcon
-              : UserIcon;
-  const label = `${category} category${state.modified ? ", modified" : ""}`;
-  return (
-    <span
-      className="base-prompt-trait-state"
-      data-trait-category={categoryKey(category)}
-      data-trait-modified={state.modified || undefined}
-      role="img"
-      aria-label={label}
-    >
-      <Icon size={16} aria-hidden="true" />
-      {state.modified && (
-        <PencilSimpleIcon
-          className="base-prompt-trait-modified"
-          size={10}
-          aria-hidden="true"
+      {deletingCategory && (
+        <AlertDialog
+          title={`Delete ${deletingCategory.title}?`}
+          description="Custom entries in this category will be deleted. Plugin entries will move to Uncategorized when you apply the base prompt."
+          onClose={() => setDeletingCategory(null)}
+          actions={
+            <>
+              <Button onClick={() => setDeletingCategory(null)}>Cancel</Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  mutate((current) => {
+                    const keepOrRehome = (module: SavedModule) =>
+                      module.category !== deletingCategory.id
+                        ? module
+                        : module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN
+                          ? null
+                          : { ...module, category: "uncategorized" };
+                    return {
+                      ...current,
+                      composition: {
+                        ...current.composition,
+                        categories: current.composition.categories.filter(
+                          (category) => category.id !== deletingCategory.id,
+                        ),
+                        modules: normalizedModules(
+                          current.composition.modules
+                            .map(keepOrRehome)
+                            .filter(
+                              (module): module is SavedModule => !!module,
+                            ),
+                        ),
+                      },
+                      inactiveModules: current.inactiveModules
+                        .map(keepOrRehome)
+                        .filter((module): module is SavedModule => !!module),
+                    };
+                  });
+                  setDeletingCategory(null);
+                }}
+              >
+                Delete category
+              </Button>
+            </>
+          }
         />
       )}
-    </span>
+    </section>
   );
 }
 
@@ -1185,10 +1621,6 @@ function sourceLabel(module: SavedModule) {
   return module.pluginId === DEFAULT_INSTRUCTIONS_PLUGIN
     ? "Buzz defaults"
     : module.pluginId;
-}
-
-function categoryKey(category: InstructionCategory) {
-  return category.toLowerCase();
 }
 
 function formatInstructionPercentage(percentage: number) {

@@ -608,7 +608,13 @@ fn spawned_listener_receives_exact_app_base_until_confirmed_teardown() {
         Ok(bundle(tools.path())),
         dir.path().join("ownership"),
     );
-    let expected = include_bytes!("../../instructions/base.md");
+    let expected = controller
+        .snapshot()
+        .unwrap()
+        .instructions
+        .composition
+        .text()
+        .into_bytes();
     let launched_base = |launches: usize| {
         // The child reads the override before publishing its launch record.
         wait_for_contents(&dir.path().join("starts"), |text| {

@@ -398,10 +398,10 @@ fn instruction_adoption_is_cas_pinned_and_failure_preserves_previous_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::open(dir.path().to_owned()).unwrap();
     let baseline = store.instructions().unwrap();
-    assert_eq!(
-        baseline.composition.text(),
-        include_str!("../../instructions/base.md")
-    );
+    assert!(baseline
+        .composition
+        .text()
+        .starts_with("## Core\n\n### Buzz identity\n\nYou are an agent operating inside Buzz"));
     let mut selection = baseline.draft();
     selection
         .composition
@@ -476,11 +476,13 @@ fn version_two_baseline_splits_metadata_without_changing_launch_identity() {
             plugin_id: plugin.into(),
             revision: "bundled".into(),
             order,
+            category: None,
             text: text.into(),
         };
     let saved = crate::SavedInstructions {
         revision: 7,
         composition: crate::InstructionComposition {
+            categories: Vec::new(),
             modules: vec![
                 module(
                     "buzz.agent-instructions",

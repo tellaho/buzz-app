@@ -19,8 +19,7 @@
   flex-direction: column;
   gap: var(--space-4);
 }
-.base-prompt-toolbar,
-.base-prompt-footer {
+.base-prompt-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -90,23 +89,41 @@
   align-items: center;
   gap: var(--space-1);
 }
-[data-trait-category="core"] {
-  --trait-category: var(--category-core);
+[data-category-tone="slate"] {
+  --trait-category: var(--category-tone-slate);
 }
-[data-trait-category="capabilities"] {
-  --trait-category: var(--category-capabilities);
+[data-category-tone="red"] {
+  --trait-category: var(--category-tone-red);
 }
-[data-trait-category="communication"] {
-  --trait-category: var(--category-communication);
+[data-category-tone="orange"] {
+  --trait-category: var(--category-tone-orange);
 }
-[data-trait-category="practice"] {
-  --trait-category: var(--category-practice);
+[data-category-tone="amber"] {
+  --trait-category: var(--category-tone-amber);
 }
-[data-trait-category="custom"] {
-  --trait-category: var(--category-custom);
+[data-category-tone="lime"] {
+  --trait-category: var(--category-tone-lime);
 }
-[data-trait-category="plugin"] {
-  --trait-category: var(--category-plugin);
+[data-category-tone="green"] {
+  --trait-category: var(--category-tone-green);
+}
+[data-category-tone="teal"] {
+  --trait-category: var(--category-tone-teal);
+}
+[data-category-tone="cyan"] {
+  --trait-category: var(--category-tone-cyan);
+}
+[data-category-tone="blue"] {
+  --trait-category: var(--category-tone-blue);
+}
+[data-category-tone="indigo"] {
+  --trait-category: var(--category-tone-indigo);
+}
+[data-category-tone="purple"] {
+  --trait-category: var(--category-tone-purple);
+}
+[data-category-tone="pink"] {
+  --trait-category: var(--category-tone-pink);
 }
 .base-prompt-category-swatch {
   width: 0.75rem;
@@ -129,16 +146,81 @@
   list-style: none;
   padding: 0;
 }
+.base-prompt-board[data-view-mode="sections"] {
+  grid-auto-rows: var(--base-prompt-section-row);
+}
 .base-prompt-add-row {
   display: grid;
   min-width: 0;
   min-height: 0;
 }
+.base-prompt-board[data-view-mode="sections"] .base-prompt-add-row {
+  display: none;
+}
 .base-prompt-board > li {
   transition: opacity var(--duration-state) var(--easing-state);
 }
-.base-prompt-board[data-has-selection] > li:not([data-selected]) {
+.base-prompt-board[data-has-selection]
+  > li:not([data-selected], .base-prompt-category-heading) {
   opacity: 0.35;
+}
+.base-prompt-category-heading {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--border-standard);
+  list-style: none;
+}
+.base-prompt-category-color,
+.base-prompt-tone-option {
+  width: var(--space-5);
+  height: var(--space-5);
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: var(--trait-category);
+}
+.base-prompt-category-color {
+  cursor: pointer;
+}
+.base-prompt-category-title {
+  min-width: 8rem;
+  flex: 1;
+}
+.base-prompt-category-title .buzz-input {
+  border-color: transparent;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-heading);
+  line-height: var(--text-heading--line-height);
+  font-weight: var(--text-heading--font-weight);
+  letter-spacing: var(--text-heading--letter-spacing);
+}
+.base-prompt-category-title .buzz-input:hover,
+.base-prompt-category-title .buzz-input:focus {
+  border-color: var(--border-control);
+  background: var(--surface-inset);
+}
+.base-prompt-empty-category {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-column: span 1;
+  grid-row: span 2;
+  place-items: center;
+  border: 1px dashed var(--border-standard);
+  border-radius: var(--radius-row);
+  background: var(--surface-inset);
+  list-style: none;
+}
+.base-prompt-empty-category[data-drop-target] {
+  border-color: var(--border-focus);
+  background: var(--affordance-subtle);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-focus);
 }
 .base-prompt-add-trait {
   display: grid;
@@ -191,7 +273,8 @@ html[data-keyboard-navigation] .base-prompt-add-trait:focus-visible {
   pointer-events: none;
   box-shadow: var(--shadow-sm);
 }
-.base-prompt-trait[data-drop-target] {
+.base-prompt-trait[data-drop-target],
+.base-prompt-category-heading[data-drop-target] {
   box-shadow: inset 0 0 0 2px var(--border-focus);
 }
 .base-prompt-trait-open {
@@ -346,8 +429,26 @@ html[data-keyboard-navigation] .base-prompt-editor-reset:focus-visible {
   gap: var(--space-1);
 }
 .base-prompt-footer {
-  border-top: 1px solid var(--border-standard);
+  position: fixed;
+  z-index: 1;
+  right: var(--space-panel-inset);
+  bottom: var(--space-panel-inset);
+  display: flex;
+  max-width: calc(100vw - 2 * var(--space-panel-inset));
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--border-standard);
+  border-radius: var(--radius-panel);
+  background: var(--surface-popover);
+  box-shadow: var(--shadow-sm);
+}
+.base-prompt-reset {
+  display: flex;
+  justify-content: flex-end;
   padding-top: var(--space-4);
+  border-top: 1px solid var(--border-standard);
 }
 
 @media (max-width: 800px) {

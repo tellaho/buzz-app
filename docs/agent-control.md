@@ -207,35 +207,45 @@ The adjacent `source.json` records the original path, byte count and SHA-256.
 This is an ownership transfer, not automatic inheritance on runtime upgrades.
 
 The first controller open migrates version-1 storage to a version-3 document with
-that exact baseline. Fourteen ordered traits preserve the source bytes while
-giving identity, turn routing, CLI, project, communication, memory and engineering
-behaviors independent ownership. Version-2 profiles whose frozen three-module
-baseline is recognized are split metadata-only: their revision, concatenated
-bytes and launch hash do not change, and the newer incoming-turn trait is merely
-available until explicitly added. Unknown or modified legacy modules remain
-intact. A missing or malformed retained composition blocks use rather than
-silently replacing it with defaults. Migration retains unknown document/agent
-fields and uses the existing private atomic-write path.
+fourteen ordered entries grouped into editable categories. Fresh structured
+compositions generate a `## Category` heading and `### Entry` heading around each
+body. Version-2 profiles whose frozen three-module baseline is recognized are
+split metadata-only: their revision, concatenated bytes and launch hash do not
+change. Their legacy bytes remain authoritative until an explicit **Apply base
+prompt** converts the draft to the structured format. Unknown or modified legacy
+modules remain intact. A missing or malformed retained composition blocks use
+rather than silently replacing it with defaults. Migration retains unknown
+document/agent fields and uses the existing private atomic-write path.
 
 The existing plugin lifecycle supplies **proposals**, not execution state.
-`agentInstructions.register({ id, title, order, text })` namespaces each contribution
-by its installed plugin identity/revision and removes it on disposal. The bundled
-instruction-only plugin owns the non-Projects sections; Projects contributes its
-section. Disabled Projects is absent from the proposal. Incomplete/failed plugin
-activation blocks adoption rather than silently omitting unavailable text.
+`agentInstructions.register({ id, title, order, category?, text })` namespaces each
+contribution by its installed plugin identity/revision and removes it on disposal.
+Contribution text is body-only Markdown; H1–H3 headings are rejected because the
+host generates them. The bundled instruction-only plugin owns the non-Projects
+entries; Projects contributes its entry. Disabled Projects is absent from the
+proposal. Incomplete/failed plugin activation blocks adoption rather than silently
+omitting unavailable text.
 
 **Settings → Plugins** changes plugin availability; it does not atomically change
-native agent instructions. **Agents → Base prompt** is a staged character builder:
-active traits can be edited, removed and reordered; removed traits stay available;
-and profile-local custom traits use the reserved `buzz.local-instructions` source.
-Source traits can be reset to their current proposal, while inactive custom traits
-can also be deleted. **Apply base prompt** is the explicit second step: native
-validates active and inactive metadata, uniqueness, ordering, bounds and selected
-plugin revisions, then compare-and-swap saves exact bytes. The UI does not claim
-adoption until native confirms it. Failed/uncertain writes retain the draft and
-require a fresh read before retry; no automatic restart occurs. These defaults
-cover all local agents and communities in this app profile, not a selected relay
-identity.
+native agent instructions. Source-owned entries cannot be deleted. Bundled Buzz
+default entries allow title/body edits and reset to their bundled source; the
+Projects entry remains read-only. Disable Projects, then apply the draft, to
+deactivate its instructions. **Agents → Base prompt** provides two presentations
+over one draft: **Sections** groups separate
+masonry stacks below editable, reorderable, color-coded category headings, while
+**All entries** preserves the single flattened grid. Custom entries remain editable
+in either view. Only Sections supports category management and cross-category
+dragging; All entries restricts ordering to the entry's current category. Empty
+categories appear only in Sections and are omitted from generated Markdown.
+
+**Apply base prompt** is the explicit second step: native validates category and
+entry metadata, body-only Markdown, uniqueness, ordering, bounds and selected
+plugin revisions, then compare-and-swap saves the composition. The UI does not
+claim adoption until native confirms it. Failed/uncertain writes retain the draft
+and require a fresh read before retry. Running agents are not restarted
+automatically; the UI indicates how many must be restarted for the applied content
+to take effect. These defaults cover all local agents and communities in this app
+profile, not a selected relay identity.
 
 Every Start/Restart (including enabled-agent restoration and mention-start)
 materializes the **retained native composition**, without requiring React/plugin

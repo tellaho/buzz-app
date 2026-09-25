@@ -20,7 +20,10 @@ import type {
 } from "../../src/features/relay/service";
 import { createAgentControl } from "../../src/features/agents/control";
 import { controlFixture } from "../../src/features/agents/control-testing";
-import type { AgentInstructions } from "../../src/features/agent-instructions/service";
+import {
+  DEFAULT_INSTRUCTION_CATEGORIES,
+  type AgentInstructions,
+} from "../../src/features/agent-instructions/service";
 import { Button } from "../../src/shared/design-system/ui/Button";
 import { useKeyboardFocusVisibility } from "../../src/shared/design-system/useKeyboardFocusVisibility";
 import "../../src/shared/styles/globals.css";
@@ -138,7 +141,8 @@ const promptModules = [
     pluginId: "buzz.agent-instructions",
     revision: "bundled",
     order: 0,
-    text: "You are an agent operating inside Buzz.\n\n",
+    category: "core",
+    text: "You are an agent operating inside Buzz. ".repeat(80),
   },
   {
     key: "buzz.agent-instructions/threading",
@@ -146,19 +150,22 @@ const promptModules = [
     pluginId: "buzz.agent-instructions",
     revision: "bundled",
     order: 10,
-    text: "## Threading\n\nKeep human conversations flat.\n\n",
+    category: "communication",
+    text: "Keep human conversations flat.",
   },
   {
-    key: "buzz.agent-instructions/engineering-discipline",
-    title: "Engineering discipline",
+    key: "buzz.projects/projects",
+    title: "Projects",
     pluginId: "buzz.projects",
     revision: "bundled",
     order: 20,
-    text: "## Engineering Discipline\n\nUnderstand before changing.\n",
+    category: "plugins",
+    text: "Use Buzz projects for persistent shared work.",
   },
 ] as const;
 const promptProposal = {
   composition: {
+    categories: DEFAULT_INSTRUCTION_CATEGORIES,
     modules: promptModules,
     plugins: [
       { id: "buzz.agent-instructions", revision: "bundled", enabled: true },
@@ -176,11 +183,7 @@ fixture.data.instructions = {
   revision: 1,
   composition: {
     ...promptProposal.composition,
-    modules: promptModules.map((module) =>
-      module.key === "buzz.agent-instructions/threading"
-        ? { ...module, text: "## Threading\n\nPrefer shallow threads.\n\n" }
-        : module,
-    ),
+    modules: promptModules,
   },
   inactiveModules: [
     {
@@ -189,6 +192,7 @@ fixture.data.instructions = {
       pluginId: "buzz.local-instructions",
       revision: "profile-v1",
       order: 30,
+      category: "custom",
       text: "Keep the response concise.\n",
     },
   ],

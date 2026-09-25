@@ -529,12 +529,18 @@
   --affordance-accent-prominent: var(--purple-9);
   --affordance-accent-prominent-hover: var(--purple-10);
   --border-accent: var(--purple-8);
-  --category-core: var(--purple-4);
-  --category-capabilities: var(--blue-4);
-  --category-communication: var(--green-4);
-  --category-practice: var(--orange-4);
-  --category-custom: var(--amber-4);
-  --category-plugin: var(--cyan-4);
+  --category-tone-slate: var(--neutral-4);
+  --category-tone-red: var(--red-4);
+  --category-tone-orange: var(--orange-4);
+  --category-tone-amber: var(--amber-4);
+  --category-tone-lime: var(--green-5);
+  --category-tone-green: var(--green-4);
+  --category-tone-teal: var(--cyan-5);
+  --category-tone-cyan: var(--cyan-4);
+  --category-tone-blue: var(--blue-4);
+  --category-tone-indigo: var(--blue-5);
+  --category-tone-purple: var(--purple-4);
+  --category-tone-pink: var(--red-5);
 }
 
 :root[data-color-mode="dark"],
@@ -584,12 +590,18 @@
   --affordance-accent-prominent: var(--purple-9);
   --affordance-accent-prominent-hover: var(--purple-10);
   --border-accent: var(--purple-8);
-  --category-core: var(--purple-3);
-  --category-capabilities: var(--blue-3);
-  --category-communication: var(--green-3);
-  --category-practice: var(--orange-3);
-  --category-custom: var(--amber-3);
-  --category-plugin: var(--cyan-3);
+  --category-tone-slate: var(--neutral-5);
+  --category-tone-red: var(--red-3);
+  --category-tone-orange: var(--orange-3);
+  --category-tone-amber: var(--amber-3);
+  --category-tone-lime: var(--green-4);
+  --category-tone-green: var(--green-3);
+  --category-tone-teal: var(--cyan-4);
+  --category-tone-cyan: var(--cyan-3);
+  --category-tone-blue: var(--blue-3);
+  --category-tone-indigo: var(--blue-4);
+  --category-tone-purple: var(--purple-3);
+  --category-tone-pink: var(--red-4);
 }
 
 /* ============================================================
@@ -790,12 +802,18 @@
   --color-affordance-accent-prominent-hover: var(
     --affordance-accent-prominent-hover
   );
-  --color-category-core: var(--category-core);
-  --color-category-capabilities: var(--category-capabilities);
-  --color-category-communication: var(--category-communication);
-  --color-category-practice: var(--category-practice);
-  --color-category-custom: var(--category-custom);
-  --color-category-plugin: var(--category-plugin);
+  --color-category-tone-slate: var(--category-tone-slate);
+  --color-category-tone-red: var(--category-tone-red);
+  --color-category-tone-orange: var(--category-tone-orange);
+  --color-category-tone-amber: var(--category-tone-amber);
+  --color-category-tone-lime: var(--category-tone-lime);
+  --color-category-tone-green: var(--category-tone-green);
+  --color-category-tone-teal: var(--category-tone-teal);
+  --color-category-tone-cyan: var(--category-tone-cyan);
+  --color-category-tone-blue: var(--category-tone-blue);
+  --color-category-tone-indigo: var(--category-tone-indigo);
+  --color-category-tone-purple: var(--category-tone-purple);
+  --color-category-tone-pink: var(--category-tone-pink);
   --border-color-accent: var(--border-accent);
 
   /* Palette utilities remain for the palette viewer and staged migration. */

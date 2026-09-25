@@ -1,8 +1,14 @@
 import type {
+  InstructionCategory,
   InstructionDraft,
   InstructionProposal,
+  InstructionTone,
   SavedInstructions,
   SavedModule,
+} from "../../features/agent-instructions/service";
+import {
+  DEFAULT_INSTRUCTION_CATEGORIES,
+  INSTRUCTION_TONES,
 } from "../../features/agent-instructions/service";
 
 export const LOCAL_INSTRUCTIONS_PLUGIN = "buzz.local-instructions";
@@ -14,16 +20,6 @@ export type InstructionModuleState = {
   source: "current" | "unavailable" | "local";
   modified: boolean;
 };
-
-export const INSTRUCTION_CATEGORIES = [
-  "Core",
-  "Capabilities",
-  "Communication",
-  "Practice",
-  "Custom",
-  "Plugin",
-] as const;
-export type InstructionCategory = (typeof INSTRUCTION_CATEGORIES)[number];
 
 export type InstructionCategorySummary = {
   category: InstructionCategory;
@@ -40,6 +36,7 @@ export type InstructionTileSpan = {
 
 export type MutableInstructionDraft = {
   composition: {
+    categories: InstructionCategory[];
     modules: SavedModule[];
     plugins: { id: string; revision: string; enabled: boolean }[];
   };
@@ -49,13 +46,23 @@ export type MutableInstructionDraft = {
 export function instructionDraft(
   saved: SavedInstructions,
 ): MutableInstructionDraft {
+  const structured = !!saved.composition.categories?.length;
   return {
     composition: {
-      modules: saved.composition.modules.map((module) => ({ ...module })),
+      categories: (
+        saved.composition.categories ?? DEFAULT_INSTRUCTION_CATEGORIES
+      ).map((category) => ({ ...category })),
+      modules: saved.composition.modules.map((module) => ({
+        ...module,
+        category: module.category ?? legacyCategoryId(module),
+        text: structured ? module.text : legacyInstructionBody(module),
+      })),
       plugins: saved.composition.plugins.map((plugin) => ({ ...plugin })),
     },
     inactiveModules: (saved.inactiveModules ?? []).map((module) => ({
       ...module,
+      category: module.category ?? legacyCategoryId(module),
+      text: structured ? module.text : legacyInstructionBody(module),
     })),
   };
 }
@@ -66,10 +73,6 @@ export function normalizedModules(modules: readonly SavedModule[]) {
 
 export function instructionEditorText(text: string) {
   return text.trimEnd();
-}
-
-export function instructionTextWithBoundary(text: string, source: string) {
-  return `${text.trimEnd()}${source.slice(source.trimEnd().length)}`;
 }
 
 export function availableInstructionModules(
@@ -96,6 +99,13 @@ export function sourceModule(
   proposal: InstructionProposal,
 ): SavedModule | undefined {
   return proposal.composition.modules.find((module) => module.key === key);
+}
+
+export function editableInstructionModule(module: SavedModule) {
+  return (
+    module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN ||
+    module.pluginId === DEFAULT_INSTRUCTIONS_PLUGIN
+  );
 }
 
 export function instructionModuleState(
@@ -126,15 +136,68 @@ export function preparedInstructionDraft(
   draft: MutableInstructionDraft,
   proposal: InstructionProposal,
 ): { draft: InstructionDraft; unavailable: SavedModule[] } {
-  const unavailable = draft.composition.modules.filter(
-    (module) =>
-      module.pluginId !== LOCAL_INSTRUCTIONS_PLUGIN &&
-      !proposal.composition.plugins.some(
-        (plugin) =>
-          plugin.id === module.pluginId &&
-          plugin.revision === module.revision &&
-          plugin.enabled,
-      ),
+  const enabled = new Map(
+    proposal.composition.plugins
+      .filter((plugin) => plugin.enabled)
+      .map((plugin) => [plugin.id, plugin.revision]),
+  );
+  const retained = new Map(
+    [...draft.composition.modules, ...draft.inactiveModules].map((module) => [
+      module.key,
+      module,
+    ]),
+  );
+  const sourced = new Map(
+    proposal.composition.modules.map((module) => [module.key, module]),
+  );
+  const active = draft.composition.modules.flatMap((module) => {
+    if (module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN) return [module];
+    const source = sourced.get(module.key);
+    if (!source || enabled.get(source.pluginId) !== source.revision) return [];
+    const content =
+      module.pluginId === DEFAULT_INSTRUCTIONS_PLUGIN
+        ? { title: module.title, text: module.text }
+        : {};
+    return [
+      {
+        ...source,
+        ...content,
+        category: module.category ?? source.category ?? "plugins",
+        order: module.order,
+      },
+    ];
+  });
+  for (const source of proposal.composition.modules) {
+    if (
+      enabled.get(source.pluginId) !== source.revision ||
+      active.some((module) => module.key === source.key)
+    )
+      continue;
+    const previous = retained.get(source.key);
+    const preferredCategory =
+      previous?.category ?? source.category ?? "plugins";
+    active.push({
+      ...source,
+      category: draft.composition.categories.some(
+        (category) => category.id === preferredCategory,
+      )
+        ? preferredCategory
+        : "uncategorized",
+      order: active.length * 10,
+    });
+  }
+  const activeKeys = new Set(active.map((module) => module.key));
+  const inactive = [
+    ...draft.inactiveModules,
+    ...draft.composition.modules.filter(
+      (module) =>
+        module.pluginId !== LOCAL_INSTRUCTIONS_PLUGIN &&
+        !activeKeys.has(module.key),
+    ),
+  ].filter(
+    (module, index, modules) =>
+      !activeKeys.has(module.key) &&
+      modules.findIndex((candidate) => candidate.key === module.key) === index,
   );
   const plugins = proposal.composition.plugins.map((plugin) => ({ ...plugin }));
   if (
@@ -150,13 +213,16 @@ export function preparedInstructionDraft(
     });
   }
   return {
-    unavailable,
+    unavailable: [],
     draft: {
       composition: {
-        modules: normalizedModules(draft.composition.modules),
+        categories: draft.composition.categories.map((category) => ({
+          ...category,
+        })),
+        modules: normalizedModules(active),
         plugins: plugins.sort((a, b) => a.id.localeCompare(b.id)),
       },
-      inactiveModules: draft.inactiveModules.map((module) => ({ ...module })),
+      inactiveModules: inactive.map((module) => ({ ...module })),
     },
   };
 }
@@ -175,28 +241,47 @@ export function instructionDraftChanged(
   );
 }
 
-const categories: Record<string, InstructionCategory> = {
-  "buzz-identity": "Core",
-  "incoming-turn": "Core",
-  "buzz-cli": "Core",
-  "agent-creation": "Capabilities",
-  workspace: "Capabilities",
-  "agent-memory": "Capabilities",
-  mentions: "Communication",
-  "callback-mentions": "Communication",
-  threading: "Communication",
-  "general-communication": "Communication",
-  "engineering-discipline": "Practice",
-  "repository-workflow": "Practice",
-  autonomy: "Practice",
+const categories: Record<string, string> = {
+  "buzz-identity": "core",
+  "incoming-turn": "core",
+  "buzz-cli": "core",
+  projects: "plugins",
+  "agent-creation": "capabilities",
+  workspace: "capabilities",
+  "agent-memory": "capabilities",
+  mentions: "communication",
+  "callback-mentions": "communication",
+  threading: "communication",
+  "general-communication": "communication",
+  "engineering-discipline": "practice",
+  "repository-workflow": "practice",
+  autonomy: "practice",
 };
 
-export function instructionCategory(module: SavedModule): InstructionCategory {
-  if (module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN) return "Custom";
-  if (module.pluginId !== DEFAULT_INSTRUCTIONS_PLUGIN) return "Plugin";
+function legacyCategoryId(module: SavedModule) {
+  if (module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN) return "custom";
   const known = categories[module.key.slice(module.key.lastIndexOf("/") + 1)];
   if (known) return known;
-  return "Core";
+  return module.pluginId === DEFAULT_INSTRUCTIONS_PLUGIN ? "core" : "plugins";
+}
+
+export function instructionCategory(
+  module: SavedModule,
+  available:
+    | readonly InstructionCategory[]
+    | number = DEFAULT_INSTRUCTION_CATEGORIES,
+): InstructionCategory {
+  const categoryList = Array.isArray(available)
+    ? available
+    : DEFAULT_INSTRUCTION_CATEGORIES;
+  const id = module.category ?? legacyCategoryId(module);
+  const fallback =
+    categoryList.find((category) => category.id === "uncategorized") ??
+    DEFAULT_INSTRUCTION_CATEGORIES.find(
+      (category) => category.id === "uncategorized",
+    );
+  if (!fallback) throw new Error("Missing Uncategorized instruction category");
+  return categoryList.find((category) => category.id === id) ?? fallback;
 }
 
 export function estimateInstructionTokens(text: string) {
@@ -209,18 +294,19 @@ export function instructionPercentage(characters: number, total: number) {
 
 export function instructionCategorySummaries(
   modules: readonly SavedModule[],
+  categories: readonly InstructionCategory[] = DEFAULT_INSTRUCTION_CATEGORIES,
 ): InstructionCategorySummary[] {
   const total = modules.reduce((sum, module) => sum + module.text.length, 0);
-  const characters = new Map<InstructionCategory, number>();
+  const characters = new Map<string, number>();
   for (const module of modules) {
-    const category = instructionCategory(module);
+    const category = instructionCategory(module, categories);
     characters.set(
-      category,
-      (characters.get(category) ?? 0) + module.text.length,
+      category.id,
+      (characters.get(category.id) ?? 0) + module.text.length,
     );
   }
-  return INSTRUCTION_CATEGORIES.flatMap((category) => {
-    const count = characters.get(category);
+  return categories.flatMap((category) => {
+    const count = characters.get(category.id);
     return count === undefined
       ? []
       : [
@@ -232,6 +318,53 @@ export function instructionCategorySummaries(
           },
         ];
   });
+}
+
+export function instructionPrompt(
+  categories: readonly InstructionCategory[],
+  modules: readonly SavedModule[],
+) {
+  const sections = categories.flatMap((category) => {
+    const entries = modules.filter(
+      (module) => (module.category ?? "uncategorized") === category.id,
+    );
+    if (!entries.length) return [];
+    return [
+      [
+        `## ${category.title.trim()}`,
+        ...entries.map((module) => {
+          const body = module.text.trim();
+          return `### ${module.title.trim()}${body ? `\n\n${body}` : ""}`;
+        }),
+      ].join("\n\n"),
+    ];
+  });
+  return sections.length ? `${sections.join("\n\n")}\n` : "";
+}
+
+export function nextInstructionTone(
+  categories: readonly InstructionCategory[],
+): InstructionTone {
+  const used = new Set(categories.map((category) => category.tone));
+  return INSTRUCTION_TONES.find((tone) => !used.has(tone)) ?? "slate";
+}
+
+function legacyInstructionBody(module: SavedModule) {
+  if (
+    module.pluginId !== DEFAULT_INSTRUCTIONS_PLUGIN &&
+    module.pluginId !== "buzz.projects"
+  )
+    return module.text;
+  const lines = module.text.split(/\r?\n/);
+  let index = 0;
+  while (index < lines.length && !lines[index]?.trim()) index++;
+  while (index < lines.length) {
+    const line = lines[index]?.trim() ?? "";
+    if (!/^#{1,3}(?:\s|$)/u.test(line)) break;
+    index++;
+    while (index < lines.length && !lines[index]?.trim()) index++;
+  }
+  return lines.slice(index).join("\n").trimEnd();
 }
 
 export function instructionBoardColumns(width: number) {

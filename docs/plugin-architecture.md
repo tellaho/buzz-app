@@ -161,19 +161,21 @@ frontend hot reload alone cannot add the entry.
 ### Agent base instruction contributions
 
 Instruction-only plugins and feature plugins share
-`ctx.agentInstructions.register({ id, title, order, text })`. The existing Cordis
-scope supplies plugin identity/revision and disposal. Contributions are ordered
-by numeric order then namespaced key; text is concatenated exactly, with no
-injected separators. Authors own their module's boundary whitespace. Projects
-contributes its existing base section; the bundled Base instructions plugin
-contributes the surrounding unchanged text.
+`ctx.agentInstructions.register({ id, title, order, category?, text })`. The existing
+Cordis scope supplies plugin identity/revision and disposal. `text` is body-only
+Markdown and may not contain H1–H3 headings; the host generates `## Category` and
+`### Entry` headings in category and entry order. `category` is an optional stable
+default and otherwise falls back to Plugins. Projects contributes its base entry;
+the bundled Base instructions plugin contributes the remaining entries.
 
 This registry proposes content; it does not own execution or persistence. Native
 agent control retains the exact adopted composition, plugin selections and saved
 revision independently of plugin/page lifetime. Settings switches affect the
-proposal only. The owner reviews it in Agents and explicitly applies it; running
-agents require Restart. Failed/incomplete activation blocks Apply, and a plugin
-update never silently replaces saved bytes. See [agent controls](agent-control.md#app-owned-base-instructions)
+proposal only. Source-owned entries are non-deleteable in the instruction builder.
+Bundled Buzz defaults are editable and resettable, while the Projects entry is
+read-only; disabling Projects and applying the resulting draft deactivates it. The
+owner reviews the draft in Agents and explicitly applies it; running agents must
+then be restarted. Failed/incomplete activation blocks Apply. See [agent controls](agent-control.md#app-owned-base-instructions)
 for migration, validation, scope and delivery-evidence limits.
 
 ### Composer accessories
