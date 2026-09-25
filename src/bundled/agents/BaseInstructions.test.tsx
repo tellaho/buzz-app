@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
 import {
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
@@ -16,6 +18,11 @@ import type {
 import { createAgentControl } from "../../features/agents/control";
 import { useSyncExternalStore } from "react";
 import { controlFixture } from "../../features/agents/control-testing";
+import {
+  DEFAULT_INSTRUCTIONS_PLUGIN,
+  LOCAL_INSTRUCTIONS_PLUGIN,
+  LOCAL_INSTRUCTIONS_REVISION,
+} from "./base-instruction-draft";
 
 afterEach(cleanup);
 const proposal: InstructionProposal = {
@@ -280,5 +287,156 @@ it("stages accessible reordering, retained removal and custom trait creation", a
   );
   await user.click(await screen.findByRole("menuitem", { name: "Remove" }));
   expect(screen.getByRole("button", { name: "Delete Curiosity" })).toBeTruthy();
+  control.dispose();
+});
+
+it("shows compact origin and modification states in both trait lists", async () => {
+  const user = userEvent.setup();
+  const defaultModule = {
+    key: `${DEFAULT_INSTRUCTIONS_PLUGIN}/core`,
+    title: "Default behavior",
+    pluginId: DEFAULT_INSTRUCTIONS_PLUGIN,
+    revision: "bundled",
+    order: 0,
+    text: "Default instructions",
+  };
+  const pluginModule = {
+    key: "fixture/plugin",
+    title: "Plugin behavior",
+    pluginId: "fixture",
+    revision: "v1",
+    order: 10,
+    text: "Plugin instructions",
+  };
+  const unavailableSource = {
+    ...pluginModule,
+    key: "fixture/unavailable",
+    title: "Unavailable behavior",
+    order: 20,
+  };
+  const source: InstructionProposal = {
+    composition: {
+      modules: [defaultModule, pluginModule, unavailableSource],
+      plugins: [
+        {
+          id: DEFAULT_INSTRUCTIONS_PLUGIN,
+          revision: "bundled",
+          enabled: true,
+        },
+        { id: "fixture", revision: "v1", enabled: true },
+      ],
+    },
+    error: null,
+  };
+  const customModule = {
+    key: `${LOCAL_INSTRUCTIONS_PLUGIN}/custom`,
+    title: "Custom behavior",
+    pluginId: LOCAL_INSTRUCTIONS_PLUGIN,
+    revision: LOCAL_INSTRUCTIONS_REVISION,
+    order: 20,
+    text: "Custom instructions",
+  };
+  const saved = {
+    revision: 1,
+    composition: {
+      ...source.composition,
+      modules: [
+        defaultModule,
+        { ...pluginModule, text: "Personalized plugin instructions" },
+      ],
+    },
+    inactiveModules: [customModule, { ...unavailableSource, revision: "old" }],
+  };
+  const fixture = controlFixture();
+  const control = createAgentControl({
+    ...fixture.host,
+    snapshot: async () => ({
+      agents: [],
+      runtimeAvailable: true,
+      instructions: saved,
+    }),
+    adoptInstructions: async () => ({
+      agents: [],
+      runtimeAvailable: true,
+      instructions: saved,
+    }),
+  });
+  await control.refresh();
+  const instructionSource: AgentInstructions = {
+    register() {},
+    snapshot: () => source,
+    subscribe: () => () => {},
+  };
+  function Harness() {
+    const state = useSyncExternalStore(control.subscribe, control.snapshot);
+    return (
+      <BaseInstructions
+        instructions={instructionSource}
+        control={control}
+        state={state}
+      />
+    );
+  }
+  render(<Harness />);
+
+  const defaultRow = screen
+    .getByRole("button", { name: "Default behavior" })
+    .closest("li");
+  const modifiedPluginRow = screen
+    .getByRole("button", { name: "Plugin behavior" })
+    .closest("li");
+  const customRow = screen
+    .getByRole("button", { name: "Custom behavior" })
+    .closest("li");
+  expect(defaultRow).toHaveAttribute("data-trait-origin", "default");
+  expect(defaultRow).not.toHaveAttribute("data-trait-modified");
+  expect(
+    within(defaultRow as HTMLElement).getByRole("img", {
+      name: "Default trait",
+    }),
+  ).toBeTruthy();
+  expect(modifiedPluginRow).toHaveAttribute("data-trait-origin", "plugin");
+  expect(modifiedPluginRow).toHaveAttribute("data-trait-modified", "true");
+  expect(
+    within(modifiedPluginRow as HTMLElement).getByRole("img", {
+      name: "Plugin trait, modified",
+    }),
+  ).toBeTruthy();
+  expect(customRow).toHaveAttribute("data-trait-origin", "custom");
+  expect(
+    within(customRow as HTMLElement).getByRole("img", {
+      name: "Custom trait",
+    }),
+  ).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: "Custom behavior" }));
+  expect(
+    screen.getByRole("dialog", { name: "Edit Custom behavior" }),
+  ).toBeTruthy();
+  expect(screen.getByText("Created in this app profile.")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+  await user.click(
+    screen.getByRole("button", { name: "Unavailable behavior" }),
+  );
+  expect(
+    screen.getByText(
+      "Source: fixture. The saved source revision is unavailable.",
+    ),
+  ).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+  await user.click(screen.getByRole("button", { name: "Plugin behavior" }));
+  expect(screen.getByText("Modified Plugin trait")).toBeTruthy();
+  expect(
+    screen.getByText("Source: fixture. Differs from the current source."),
+  ).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Reset to default" }));
+  expect(screen.getByText("Plugin trait", { exact: true })).toBeTruthy();
+  expect(
+    screen.getByText("Source: fixture. Matches the current source."),
+  ).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Save trait" }));
+  expect(modifiedPluginRow).not.toHaveAttribute("data-trait-modified");
   control.dispose();
 });

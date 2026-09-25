@@ -6,9 +6,11 @@ import type {
 } from "../../features/agent-instructions/service";
 import {
   availableInstructionModules,
+  DEFAULT_INSTRUCTIONS_PLUGIN,
   instructionEditorText,
   instructionDraft,
   instructionDraftChanged,
+  instructionModuleState,
   instructionTextWithBoundary,
   LOCAL_INSTRUCTIONS_PLUGIN,
   LOCAL_INSTRUCTIONS_REVISION,
@@ -41,6 +43,62 @@ const proposal: InstructionProposal = {
 };
 
 describe("base instruction drafts", () => {
+  it("classifies module origin and source state without treating order as an edit", () => {
+    const defaultSource = module(
+      `${DEFAULT_INSTRUCTIONS_PLUGIN}/core`,
+      "default",
+      DEFAULT_INSTRUCTIONS_PLUGIN,
+    );
+    const pluginSource = module("fixture/plugin", "plugin");
+    const stateProposal: InstructionProposal = {
+      composition: {
+        modules: [defaultSource, pluginSource],
+        plugins: [
+          { id: DEFAULT_INSTRUCTIONS_PLUGIN, revision: "v1", enabled: true },
+          { id: "fixture", revision: "v1", enabled: true },
+        ],
+      },
+      error: null,
+    };
+
+    expect(
+      instructionModuleState({ ...defaultSource, order: 80 }, stateProposal),
+    ).toEqual({ origin: "default", source: "current", modified: false });
+    expect(
+      instructionModuleState(
+        { ...defaultSource, title: "Personal default" },
+        stateProposal,
+      ),
+    ).toEqual({ origin: "default", source: "current", modified: true });
+    expect(instructionModuleState(pluginSource, stateProposal)).toEqual({
+      origin: "plugin",
+      source: "current",
+      modified: false,
+    });
+    expect(
+      instructionModuleState(
+        { ...pluginSource, text: "personalized" },
+        stateProposal,
+      ),
+    ).toEqual({ origin: "plugin", source: "current", modified: true });
+    expect(
+      instructionModuleState(
+        module(
+          `${LOCAL_INSTRUCTIONS_PLUGIN}/custom`,
+          "custom",
+          LOCAL_INSTRUCTIONS_PLUGIN,
+        ),
+        stateProposal,
+      ),
+    ).toEqual({ origin: "custom", source: "local", modified: false });
+    expect(
+      instructionModuleState(
+        { ...pluginSource, revision: "old" },
+        stateProposal,
+      ),
+    ).toEqual({ origin: "plugin", source: "unavailable", modified: false });
+  });
+
   it("hides trailing whitespace while preserving the source boundary", () => {
     expect(instructionEditorText("Instructions.\n\n  \n")).toBe(
       "Instructions.",

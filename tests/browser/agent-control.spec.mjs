@@ -38,6 +38,19 @@ async function openEditor(page, name = "Fixture agent") {
   return dialog;
 }
 
+async function traitStateColors(builder) {
+  return builder
+    .locator("li[data-trait-origin]")
+    .evaluateAll((rows) =>
+      Object.fromEntries(
+        rows.map((row) => [
+          `${row.dataset.traitOrigin}:${Boolean(row.dataset.traitModified)}`,
+          getComputedStyle(row).backgroundColor,
+        ]),
+      ),
+    );
+}
+
 test("base prompt traits edit, retain, reorder and apply without restarting", async ({
   page,
 }) => {
@@ -55,13 +68,26 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
     await page.getByRole("tab", { name: "Base prompt", exact: true }).click();
     const builder = page.getByRole("region", { name: "Base prompt builder" });
     const active = builder.getByRole("region", { name: "Your base prompt" });
+    const available = builder.getByRole("region", { name: "Available traits" });
     await expect(active.getByText("3 active traits")).toBeVisible();
+    await expect(
+      active.getByRole("img", { name: "Default trait", exact: true }),
+    ).toBeVisible();
+    await expect(
+      active.getByRole("img", { name: "Default trait, modified" }),
+    ).toBeVisible();
+    await expect(
+      active.getByRole("img", { name: "Plugin trait" }),
+    ).toBeVisible();
+    await expect(
+      available.getByRole("img", { name: "Custom trait" }),
+    ).toBeVisible();
 
     const handle = active.getByRole("button", {
       name: "Drag Buzz identity to reorder",
     });
     const target = active
-      .getByRole("button", { name: "Edit Threading" })
+      .getByRole("button", { name: "Threading", exact: true })
       .locator("xpath=ancestor::li");
     const [handleBox, targetBox] = await Promise.all([
       handle.boundingBox(),
@@ -91,9 +117,12 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
       ]);
 
     await active
-      .getByRole("button", { name: "Move Buzz identity down" })
+      .getByRole("button", { name: "Actions for Buzz identity" })
       .click();
-    await active.getByRole("button", { name: "Edit Threading" }).click();
+    await page.getByRole("menuitem", { name: "Move down" }).click();
+    await active
+      .getByRole("button", { name: "Threading", exact: true })
+      .click();
     const editor = page.getByRole("dialog", { name: "Edit Threading" });
     await editor
       .getByRole("textbox", { name: "Instructions" })
@@ -101,9 +130,9 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
     await editor.getByRole("button", { name: "Save trait" }).click();
 
     await active
-      .getByRole("button", { name: "Remove Engineering discipline" })
+      .getByRole("button", { name: "Actions for Engineering discipline" })
       .click();
-    const available = builder.getByRole("region", { name: "Available traits" });
+    await page.getByRole("menuitem", { name: "Remove" }).click();
     await expect(available.getByText("Engineering discipline")).toBeVisible();
     await available.getByRole("button", { name: "New trait" }).click();
     const create = page.getByRole("dialog", { name: "Create trait" });
@@ -127,7 +156,10 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
       ),
     ).toBe(1);
 
-    await page.setViewportSize({ width: 700, height: 900 });
+    const stateColors = await traitStateColors(builder);
+    expect(new Set(Object.values(stateColors)).size).toBeGreaterThanOrEqual(4);
+
+    await page.setViewportSize({ width: 390, height: 900 });
     const [activeBox, availableBox] = await Promise.all([
       active.boundingBox(),
       available.boundingBox(),
@@ -138,6 +170,16 @@ test("base prompt traits edit, retain, reorder and apply without restarting", as
       "data-color-mode",
       "dark",
     );
+    const darkStateColors = await traitStateColors(builder);
+    expect(new Set(Object.values(darkStateColors)).size).toBeGreaterThanOrEqual(
+      4,
+    );
+    expect(darkStateColors).not.toEqual(stateColors);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
   } finally {
     await server.close();
   }

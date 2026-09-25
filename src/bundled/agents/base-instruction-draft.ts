@@ -7,6 +7,13 @@ import type {
 
 export const LOCAL_INSTRUCTIONS_PLUGIN = "buzz.local-instructions";
 export const LOCAL_INSTRUCTIONS_REVISION = "profile-v1";
+export const DEFAULT_INSTRUCTIONS_PLUGIN = "buzz.agent-instructions";
+
+export type InstructionModuleState = {
+  origin: "default" | "plugin" | "custom";
+  source: "current" | "unavailable" | "local";
+  modified: boolean;
+};
 
 export type MutableInstructionDraft = {
   composition: {
@@ -66,6 +73,30 @@ export function sourceModule(
   proposal: InstructionProposal,
 ): SavedModule | undefined {
   return proposal.composition.modules.find((module) => module.key === key);
+}
+
+export function instructionModuleState(
+  module: SavedModule,
+  proposal: InstructionProposal,
+): InstructionModuleState {
+  if (module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN)
+    return { origin: "custom", source: "local", modified: false };
+
+  const origin =
+    module.pluginId === DEFAULT_INSTRUCTIONS_PLUGIN ? "default" : "plugin";
+  const source = sourceModule(module.key, proposal);
+  if (
+    !source ||
+    source.pluginId !== module.pluginId ||
+    source.revision !== module.revision
+  )
+    return { origin, source: "unavailable", modified: false };
+
+  return {
+    origin,
+    source: "current",
+    modified: module.title !== source.title || module.text !== source.text,
+  };
 }
 
 export function preparedInstructionDraft(

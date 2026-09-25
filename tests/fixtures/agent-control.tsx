@@ -151,7 +151,7 @@ const promptModules = [
   {
     key: "buzz.agent-instructions/engineering-discipline",
     title: "Engineering discipline",
-    pluginId: "buzz.agent-instructions",
+    pluginId: "buzz.projects",
     revision: "bundled",
     order: 20,
     text: "## Engineering Discipline\n\nUnderstand before changing.\n",
@@ -162,6 +162,7 @@ const promptProposal = {
     modules: promptModules,
     plugins: [
       { id: "buzz.agent-instructions", revision: "bundled", enabled: true },
+      { id: "buzz.projects", revision: "bundled", enabled: true },
     ],
   },
   error: null,
@@ -173,8 +174,24 @@ const promptInstructions: AgentInstructions = {
 };
 fixture.data.instructions = {
   revision: 1,
-  composition: promptProposal.composition,
-  inactiveModules: [],
+  composition: {
+    ...promptProposal.composition,
+    modules: promptModules.map((module) =>
+      module.key === "buzz.agent-instructions/threading"
+        ? { ...module, text: "## Threading\n\nPrefer shallow threads.\n\n" }
+        : module,
+    ),
+  },
+  inactiveModules: [
+    {
+      key: "buzz.local-instructions/personal",
+      title: "Personal style",
+      pluginId: "buzz.local-instructions",
+      revision: "profile-v1",
+      order: 30,
+      text: "Keep the response concise.\n",
+    },
+  ],
 };
 fixture.agent.savedInstructions = { revision: 1, sha256: "saved-one" };
 fixture.agent.runningInstructions = { revision: 1, sha256: "saved-one" };

@@ -19,9 +19,12 @@ import {
   ArrowUpIcon,
   DotsThreeIcon,
   DotsSixVerticalIcon,
+  FileTextIcon,
   PencilSimpleIcon,
   PlusIcon,
+  SquaresFourIcon,
   TrashIcon,
+  UserIcon,
 } from "../../shared/design-system/icons";
 import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -39,16 +42,19 @@ import {
 import { Textarea } from "../../shared/design-system/ui/Textarea";
 import {
   availableInstructionModules,
+  DEFAULT_INSTRUCTIONS_PLUGIN,
   instructionEditorText,
   instructionDraft,
   instructionDraftChanged,
   instructionGroup,
+  instructionModuleState,
   instructionTextWithBoundary,
   LOCAL_INSTRUCTIONS_PLUGIN,
   LOCAL_INSTRUCTIONS_REVISION,
   normalizedModules,
   preparedInstructionDraft,
   sourceModule,
+  type InstructionModuleState,
   type MutableInstructionDraft,
 } from "./base-instruction-draft";
 
@@ -301,6 +307,7 @@ function BaseInstructionBuilder({
               <li
                 key={module.key}
                 data-trait-key={module.key}
+                {...traitStateAttributes(module, proposal)}
                 data-drop-before={dropAt === index || undefined}
                 className="base-prompt-trait"
               >
@@ -313,6 +320,9 @@ function BaseInstructionBuilder({
                   onPointerMove={pointerMove}
                   onPointerUp={pointerUp}
                   onPointerCancel={stopDrag}
+                />
+                <TraitStateIcon
+                  state={instructionModuleState(module, proposal)}
                 />
                 <button
                   type="button"
@@ -437,15 +447,22 @@ function BaseInstructionBuilder({
               <h4 className="m-0 text-body-sm text-secondary">{group}</h4>
               <ul className="base-prompt-library-list">
                 {modules.map((module) => (
-                  <li key={module.key} className="base-prompt-available-trait">
-                    <TraitText module={module} />
+                  <li
+                    key={module.key}
+                    className="base-prompt-available-trait"
+                    {...traitStateAttributes(module, proposal)}
+                  >
+                    <TraitStateIcon
+                      state={instructionModuleState(module, proposal)}
+                    />
+                    <button
+                      type="button"
+                      className="base-prompt-trait-title text-label"
+                      onClick={() => edit(module, "available")}
+                    >
+                      {module.title}
+                    </button>
                     <div className="base-prompt-trait-actions">
-                      <IconButton
-                        size="compact"
-                        aria-label={`Edit ${module.title}`}
-                        icon={<PencilSimpleIcon size={16} aria-hidden="true" />}
-                        onClick={() => edit(module, "available")}
-                      />
                       {module.pluginId === LOCAL_INSTRUCTIONS_PLUGIN && (
                         <IconButton
                           size="compact"
@@ -640,6 +657,7 @@ function BaseInstructionBuilder({
           }
         >
           <div className="space-y-4">
+            <TraitStateDetails module={editor.module} proposal={proposal} />
             <Field label="Trait name" error={editorError}>
               <Input
                 autoFocus
@@ -705,18 +723,81 @@ function BaseInstructionBuilder({
   );
 }
 
-function TraitText({ module }: { module: SavedModule }) {
-  const summary = module.text
-    .replace(/^#{1,6}\s+[^\n]+\n+/, "")
-    .replace(/\s+/g, " ")
-    .trim();
+function TraitStateIcon({ state }: { state: InstructionModuleState }) {
+  const Icon =
+    state.origin === "default"
+      ? FileTextIcon
+      : state.origin === "plugin"
+        ? SquaresFourIcon
+        : UserIcon;
+  const label = `${originLabel(state.origin)}${state.modified ? ", modified" : ""}`;
   return (
-    <div className="base-prompt-trait-copy">
-      <p className="m-0 text-label">{module.title}</p>
-      <p className="m-0 text-body-sm text-secondary">
-        {summary.slice(0, 120) || "No instructions yet."}
-        {summary.length > 120 ? "…" : ""}
-      </p>
+    <span
+      className="base-prompt-trait-state"
+      data-trait-origin={state.origin}
+      data-trait-modified={state.modified || undefined}
+      role="img"
+      aria-label={label}
+    >
+      <Icon size={16} aria-hidden="true" />
+      {state.modified && (
+        <PencilSimpleIcon
+          className="base-prompt-trait-modified"
+          size={10}
+          aria-hidden="true"
+        />
+      )}
+    </span>
+  );
+}
+
+function traitStateAttributes(
+  module: SavedModule,
+  proposal: ReturnType<AgentInstructions["snapshot"]>,
+) {
+  const state = instructionModuleState(module, proposal);
+  return {
+    "data-trait-origin": state.origin,
+    "data-trait-modified": state.modified || undefined,
+  };
+}
+
+function TraitStateDetails({
+  module,
+  proposal,
+}: {
+  module: SavedModule;
+  proposal: ReturnType<AgentInstructions["snapshot"]>;
+}) {
+  const state = instructionModuleState(module, proposal);
+  const title = `${state.modified ? "Modified " : ""}${originLabel(state.origin)}`;
+  const detail =
+    state.origin === "custom"
+      ? "Created in this app profile."
+      : state.source === "unavailable"
+        ? `${sourceLabel(module)} The saved source revision is unavailable.`
+        : state.modified
+          ? `${sourceLabel(module)} Differs from the current source.`
+          : `${sourceLabel(module)} Matches the current source.`;
+  return (
+    <div className="base-prompt-trait-details">
+      <TraitStateIcon state={state} />
+      <div className="min-w-0">
+        <p className="m-0 text-label">{title}</p>
+        <p className="m-0 text-body-sm text-secondary">{detail}</p>
+      </div>
     </div>
   );
+}
+
+function originLabel(origin: InstructionModuleState["origin"]) {
+  if (origin === "default") return "Default trait";
+  if (origin === "plugin") return "Plugin trait";
+  return "Custom trait";
+}
+
+function sourceLabel(module: SavedModule) {
+  return module.pluginId === DEFAULT_INSTRUCTIONS_PLUGIN
+    ? "Source: Buzz defaults."
+    : `Source: ${module.pluginId}.`;
 }

@@ -68,6 +68,18 @@
   background: var(--surface-base);
   padding: var(--space-3);
 }
+.base-prompt-trait[data-trait-origin="plugin"],
+.base-prompt-available-trait[data-trait-origin="plugin"] {
+  background: var(--affordance-accent);
+}
+.base-prompt-trait[data-trait-origin="custom"],
+.base-prompt-available-trait[data-trait-origin="custom"] {
+  background: var(--affordance-success);
+}
+.base-prompt-trait[data-trait-modified],
+.base-prompt-available-trait[data-trait-modified] {
+  background: var(--affordance-warning);
+}
 .base-prompt-trait[data-drop-before]::before,
 .base-prompt-drop-end::before {
   position: absolute;
@@ -96,13 +108,29 @@
 .base-prompt-trait > :first-child:active {
   cursor: grabbing;
 }
-.base-prompt-trait-copy {
-  min-width: 0;
-  flex: 1;
+.base-prompt-trait-state {
+  position: relative;
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
 }
-.base-prompt-trait-copy > p {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.base-prompt-trait-state[data-trait-origin="plugin"] {
+  color: var(--text-accent);
+}
+.base-prompt-trait-state[data-trait-origin="custom"] {
+  color: var(--text-success);
+}
+.base-prompt-trait-state[data-trait-modified] {
+  color: var(--text-warning);
+}
+.base-prompt-trait-modified {
+  position: absolute;
+  right: 0;
+  bottom: 0;
 }
 .base-prompt-trait-title {
   min-width: 0;
@@ -116,6 +144,15 @@
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.base-prompt-trait-details {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  border: 1px solid var(--border-standard);
+  border-radius: var(--radius-row);
+  background: var(--surface-base);
+  padding: var(--space-3);
 }
 .base-prompt-trait-actions {
   display: flex;
