@@ -70,11 +70,9 @@
   .buzz-textarea[data-variant="code"] {
     @apply text-mono;
   }
-  .buzz-input[data-text-size="large"] {
-    @apply text-label;
-  }
+  .buzz-input[data-text-size="large"],
   .buzz-textarea[data-text-size="large"] {
-    @apply text-body;
+    @apply text-label;
   }
   .buzz-input::placeholder,
   .buzz-textarea::placeholder {
